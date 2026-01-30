@@ -1,4 +1,8 @@
 import crypto from 'crypto';
+import mammoth from 'mammoth';
+import pdfParse from 'pdf-parse';
+import { prisma } from '../lib/database';
+import { generateEmbedding, generateAnswer, cosineSimilarity } from '../lib/ollama';
 
 interface UploadDocumentParams {
   filename: string;
@@ -24,63 +28,238 @@ interface QueryResult {
   }>;
 }
 
+interface DocumentChunk {
+  id: string;
+  documentId: string;
+  content: string;
+  embedding: number[];
+  chunkIndex: number;
+}
+
+interface StoredDocument {
+  id: string;
+  name: string;
+  size: number;
+  type: string;
+  content: string;
+  chunks: DocumentChunk[];
+  uploadedAt: Date;
+}
+
 export class RagService {
-  private documents: Map<string, any> = new Map();
+  private readonly CHUNK_SIZE = 500; // characters per chunk
+  private readonly CHUNK_OVERLAP = 100; // overlap between chunks
+  private readonly TOP_K = 5; // number of relevant chunks to retrieve
+
+  /**
+   * Extract text from buffer (supports plain text, PDF, and DOCX)
+   */
+  private async extractText(buffer: Buffer, mimetype: string, filename: string): Promise<string> {
+    try {
+      // Plain text files
+      if (mimetype.includes('text') || filename.endsWith('.txt')) {
+        return buffer.toString('utf-8');
+      }
+
+      // PDF files
+      if (mimetype.includes('pdf') || filename.endsWith('.pdf')) {
+        try {
+          const data = await pdfParse(buffer);
+          return data.text;
+        } catch (error) {
+          console.error('Error parsing PDF:', error);
+          throw new Error(`Failed to parse PDF: ${filename}`);
+        }
+      }
+
+      // DOCX files
+      if (
+        mimetype.includes('wordprocessingml') ||
+        mimetype.includes('word') ||
+        filename.endsWith('.docx')
+      ) {
+        try {
+          const result = await mammoth.extractRawText({ buffer });
+          return result.value;
+        } catch (error) {
+          console.error('Error parsing DOCX:', error);
+          throw new Error(`Failed to parse DOCX: ${filename}`);
+        }
+      }
+
+      // Unsupported format - try UTF-8 as fallback
+      console.warn(`Unsupported mimetype: ${mimetype}. Attempting UTF-8 extraction.`);
+      return buffer.toString('utf-8');
+    } catch (error) {
+      console.error(`Error extracting text from ${filename}:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Split text into overlapping chunks
+   */
+  private chunkText(text: string): string[] {
+    const chunks: string[] = [];
+    let position = 0;
+
+    while (position < text.length) {
+      const chunkEnd = Math.min(position + this.CHUNK_SIZE, text.length);
+      chunks.push(text.substring(position, chunkEnd));
+      position += this.CHUNK_SIZE - this.CHUNK_OVERLAP;
+    }
+
+    return chunks;
+  }
 
   async uploadDocument(params: UploadDocumentParams): Promise<UploadedDocument> {
     const { filename, mimetype, buffer } = params;
     const id = crypto.randomUUID();
 
-    // TODO: Implement actual document processing
-    // - Extract text from PDF/DOCX/TXT
-    // - Split into chunks
-    // - Generate embeddings
-    // - Store in vector database (Pinecone, Weaviate, ChromaDB, etc.)
+    try {
+      // Extract text from document
+      const text = await this.extractText(buffer, mimetype, filename);
 
-    this.documents.set(id, {
-      id,
-      name: filename,
-      size: buffer.length,
-      type: mimetype,
-      content: buffer.toString('utf-8'), // Simplified - handle binary formats properly
-      uploadedAt: new Date(),
-    });
+      // Split into chunks
+      const textChunks = this.chunkText(text);
 
-    return {
-      id,
-      name: filename,
-      size: buffer.length,
-      type: mimetype,
-      status: 'ready',
-    };
+      // Generate embeddings for each chunk
+      const chunks: Array<{
+        content: string;
+        embedding: number[];
+        chunkIndex: number;
+      }> = [];
+
+      for (let i = 0; i < textChunks.length; i++) {
+        const chunkContent = textChunks[i];
+        const embedding = await generateEmbedding(chunkContent);
+        chunks.push({
+          content: chunkContent,
+          embedding,
+          chunkIndex: i,
+        });
+      }
+
+      // Save to database
+      await prisma.ragDocument.create({
+        data: {
+          id,
+          name: filename,
+          size: buffer.length,
+          type: mimetype,
+          content: text,
+          chunks: {
+            createMany: {
+              data: chunks,
+            },
+          },
+        },
+      });
+
+      return {
+        id,
+        name: filename,
+        size: buffer.length,
+        type: mimetype,
+        status: 'ready',
+      };
+    } catch (error) {
+      console.error(`Error uploading document ${filename}:`, error);
+      return {
+        id,
+        name: filename,
+        size: buffer.length,
+        type: mimetype,
+        status: 'failed',
+      };
+    }
   }
 
   async queryDocuments(question: string, fileIds: string[]): Promise<QueryResult> {
-    // TODO: Implement actual RAG query
-    // 1. Generate embedding for the question
-    // 2. Search vector database for relevant chunks
-    // 3. Use LLM (OpenAI, Claude, etc.) to generate answer with context
-    // 4. Return answer with source citations
+    try {
+      // Generate embedding for the question
+      const questionEmbedding = await generateEmbedding(question);
 
-    // Mock response for now
-    const sources = fileIds.map((fileId) => {
-      const doc = this.documents.get(fileId);
+      // Retrieve relevant chunks from database
+      const chunks = await prisma.ragChunk.findMany({
+        where: {
+          documentId: {
+            in: fileIds,
+          },
+        },
+        include: {
+          document: {
+            select: {
+              name: true,
+            },
+          },
+        },
+      });
+
+      // Calculate similarity and rank chunks
+      const relevantChunks = chunks
+        .map((chunk) => ({
+          content: chunk.content,
+          similarity: cosineSimilarity(questionEmbedding, chunk.embedding),
+          documentName: chunk.document.name,
+        }))
+        .sort((a, b) => b.similarity - a.similarity)
+        .slice(0, this.TOP_K);
+
+      if (relevantChunks.length === 0) {
+        return {
+          id: crypto.randomUUID(),
+          answer: 'No relevant information found in the provided documents.',
+          timestamp: new Date().toISOString(),
+          sources: [],
+        };
+      }
+
+      // Combine context from top chunks
+      const context = relevantChunks
+        .map((chunk) => `[${chunk.documentName}]\n${chunk.content}`)
+        .join('\n\n---\n\n');
+
+      // Generate answer using LLM with context
+      const answer = await generateAnswer(question, context);
+
+      // Prepare sources (unique documents used)
+      const sources = Array.from(new Set(relevantChunks.map((c) => c.documentName))).map((docName) => ({
+        title: docName,
+        snippet: relevantChunks
+          .find((c) => c.documentName === docName)
+          ?.content.substring(0, 150) + '...' || '',
+      }));
+
+      // Log the query
+      await prisma.queryLog.create({
+        data: {
+          question,
+          answer,
+          sources: fileIds,
+        },
+      });
+
       return {
-        title: doc?.name || 'Unknown',
-        snippet: doc?.content?.substring(0, 100) + '...' || 'No content available',
+        id: crypto.randomUUID(),
+        answer,
+        timestamp: new Date().toISOString(),
+        sources,
       };
-    });
-
-    return {
-      id: crypto.randomUUID(),
-      answer: `Based on the ${fileIds.length} document(s) provided, here's what I found regarding your question: "${question}". [This is a mock response - implement with OpenAI/Claude + vector search]`,
-      timestamp: new Date().toISOString(),
-      sources: sources.length > 0 ? sources : undefined,
-    };
+    } catch (error) {
+      console.error('Error querying documents:', error);
+      throw error;
+    }
   }
 
   async deleteDocument(fileId: string): Promise<void> {
-    // TODO: Delete from vector database
-    this.documents.delete(fileId);
+    try {
+      await prisma.ragDocument.delete({
+        where: { id: fileId },
+      });
+    } catch (error) {
+      console.error('Error deleting document:', error);
+      throw error;
+    }
   }
 }

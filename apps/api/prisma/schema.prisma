@@ -1,0 +1,45 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model RagDocument {
+  id        String   @id @default(cuid())
+  name      String
+  size      Int
+  type      String
+  content   String   @db.Text
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  chunks RagChunk[]
+
+  @@map("rag_documents")
+}
+
+model RagChunk {
+  id          String   @id @default(cuid())
+  documentId  String
+  document    RagDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  content     String   @db.Text
+  embedding   Float[]  // Store as float array (will use pgvector with proper extension)
+  chunkIndex  Int
+  createdAt   DateTime @default(now())
+
+  @@index([documentId])
+  @@map("rag_chunks")
+}
+
+model QueryLog {
+  id        String   @id @default(cuid())
+  question  String   @db.Text
+  answer    String   @db.Text
+  sources   String[] // JSON array of source document IDs
+  createdAt DateTime @default(now())
+
+  @@map("query_logs")
+}

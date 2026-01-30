@@ -17,11 +17,16 @@
     "@fastify/multipart": "^8.3.0",
     "@fastify/websocket": "^10.0.1",
     "dotenv": "^16.4.5",
-    "fastify": "^4.26.2"
+    "fastify": "^4.26.2",
+    "mammoth": "^1.11.0",
+    "ollama": "^0.6.3",
+    "pdf-parse": "^2.4.5"
   },
   "devDependencies": {
+    "@prisma/client": "^7.3.0",
     "@types/node": "^20.11.19",
     "@types/ws": "^8.18.1",
+    "prisma": "^7.3.0",
     "tsx": "^4.7.1",
     "typescript": "^5.3.3"
   }
