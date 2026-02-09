@@ -1,9 +1,25 @@
 import { FastifyPluginAsync } from 'fastify';
 import { VoiceService } from '../services/voice.service';
+import { getMonthlyUsageStats, checkWhisperQuota } from '../lib/whisper';
 
 const voiceService = new VoiceService();
 
 export const voiceRoutes: FastifyPluginAsync = async (server) => {
+  // Check Whisper quota
+  server.get('/quota', async (request, reply) => {
+    try {
+      const stats = await getMonthlyUsageStats();
+      return reply.code(200).send(stats);
+    } catch (error) {
+      server.log.error(error);
+      return reply.code(500).send({
+        error: 'Internal Server Error',
+        message: 'Failed to get quota stats',
+        statusCode: 500,
+      });
+    }
+  });
+
   // Start voice call
   server.post('/start', async (request, reply) => {
     try {

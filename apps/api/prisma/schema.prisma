@@ -43,3 +43,86 @@ model QueryLog {
 
   @@map("query_logs")
 }
+
+model Appointment {
+  id            String   @id @default(cuid())
+  date          String
+  time          String
+  service       String
+  status        String   @default("confirmed") // 'confirmed', 'pending', 'cancelled'
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  conversations Conversation[]
+
+  @@map("appointments")
+}
+
+model Conversation {
+  id            String   @id @default(cuid())
+  appointmentId String?
+  appointment   Appointment? @relation(fields: [appointmentId], references: [id], onDelete: SetNull)
+  messages      ConversationMessage[]
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([appointmentId])
+  @@map("conversations")
+}
+
+model ConversationMessage {
+  id             String   @id @default(cuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  role           String   // 'user' or 'assistant'
+  content        String   @db.Text
+  createdAt      DateTime @default(now())
+
+  @@index([conversationId])
+  @@map("conversation_messages")
+}
+
+model VoiceCall {
+  id              String   @id @default(cuid())
+  callId          String   @unique
+  status          String   // 'initiated', 'connected', 'ended'
+  durationSeconds Int      @default(0)
+  transcript      String   @db.Text @default("")
+  audioUrl        String?  // URL to stored audio file
+  costEstimate    Float    @default(0) // Estimated cost in USD
+  whisperTokens   Int      @default(0) // Number of tokens used for Whisper
+  ttsTokens       Int      @default(0) // Number of tokens used for TTS
+  createdAt       DateTime @default(now())
+  endedAt         DateTime?
+
+  @@index([status])
+  @@index([createdAt])
+  @@map("voice_calls")
+}
+
+model WhisperUsage {
+  id              String   @id @default(cuid())
+  date            DateTime @db.Date
+  minutesUsed     Float    @default(0) // Total minutes of audio processed
+  requestCount    Int      @default(0) // Number of API calls
+  estimatedCost   Float    @default(0) // Estimated cost for the day
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([date])
+  @@map("whisper_usage")
+}
+
+model WhisperQuota {
+  id              String   @id @default(cuid())
+  monthYear       String   @unique // Format: "2026-02"
+  monthlyLimitUSD Float    @default(10) // Monthly spending limit
+  minutesUsed     Float    @default(0)
+  estimatedCost   Float    @default(0)
+  requestCount    Int      @default(0)
+  isLimited       Boolean  @default(false) // True if quota exceeded
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@map("whisper_quota")
+}

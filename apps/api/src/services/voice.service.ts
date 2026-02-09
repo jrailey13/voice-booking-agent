@@ -1,5 +1,8 @@
 import crypto from 'crypto';
 import { WebSocket } from 'ws';
+import { prisma } from '../lib/database';
+import { transcribeAudio, checkWhisperQuota, getMonthlyUsageStats } from '../lib/whisper';
+import { generateBookingResponse } from '../lib/llm';
 
 interface StartCallResult {
   callId: string;
@@ -7,16 +10,45 @@ interface StartCallResult {
   websocketUrl: string;
 }
 
+interface CallMetadata {
+  id: string;
+  callId: string;
+  startedAt: Date;
+  status: 'initiated' | 'connected' | 'ended';
+  durationSeconds: number;
+  transcript: string;
+  audioChunks: Buffer[];
+  conversationId?: string;
+}
+
 export class VoiceService {
-  private activeCalls: Map<string, any> = new Map();
+  private activeCalls: Map<string, CallMetadata> = new Map();
 
   async startCall(): Promise<StartCallResult> {
     const callId = crypto.randomUUID();
 
+    // Create voice call record in database
+    const voiceCall = await prisma.voiceCall.create({
+      data: {
+        callId,
+        status: 'initiated',
+      },
+    });
+
+    // Create conversation for this call
+    const conversation = await prisma.conversation.create({
+      data: {},
+    });
+
     this.activeCalls.set(callId, {
-      id: callId,
+      id: voiceCall.id,
+      callId,
       startedAt: new Date(),
       status: 'initiated',
+      durationSeconds: 0,
+      transcript: '',
+      audioChunks: [],
+      conversationId: conversation.id,
     });
 
     return {
@@ -27,18 +59,29 @@ export class VoiceService {
   }
 
   async endCall(callId: string): Promise<void> {
-    // TODO: Clean up any voice processing resources
+    const call = this.activeCalls.get(callId);
+    if (!call) return;
+
+    // Calculate duration
+    const durationSeconds = Math.round(
+      (Date.now() - call.startedAt.getTime()) / 1000
+    );
+
+    // Update voice call in database
+    await prisma.voiceCall.update({
+      where: { callId },
+      data: {
+        status: 'ended',
+        durationSeconds,
+        transcript: call.transcript,
+        endedAt: new Date(),
+      },
+    });
+
     this.activeCalls.delete(callId);
   }
 
   async handleWebSocketMessage(callId: string, data: any, socket: WebSocket): Promise<void> {
-    // TODO: Implement actual voice processing
-    // 1. Receive audio data from client
-    // 2. Convert speech to text (Azure Speech, Google Speech, Whisper)
-    // 3. Process with conversational AI
-    // 4. Convert response to speech (TTS)
-    // 5. Send audio back to client
-
     const call = this.activeCalls.get(callId);
     if (!call) {
       socket.send(JSON.stringify({
@@ -51,40 +94,24 @@ export class VoiceService {
     // Handle different message types
     switch (data.type) {
       case 'audio':
-        // TODO: Process audio data
-        // Mock: Send back a transcript
-        socket.send(JSON.stringify({
-          type: 'transcript',
-          role: 'user',
-          text: 'I would like to book an appointment for next Tuesday.',
-          timestamp: new Date().toISOString(),
-        }));
-
-        // Update state
-        socket.send(JSON.stringify({
-          type: 'state',
-          state: 'speaking',
-        }));
-
-        // Mock assistant response after delay
-        setTimeout(() => {
-          socket.send(JSON.stringify({
-            type: 'transcript',
-            role: 'assistant',
-            text: "Great! I can help you with that. What time works best for you?",
-            timestamp: new Date().toISOString(),
-          }));
-
-          socket.send(JSON.stringify({
-            type: 'state',
-            state: 'listening',
-          }));
-        }, 2000);
+        await this.handleAudioData(callId, data, socket, call);
         break;
 
       case 'mute':
         // Handle mute toggle
-        call.muted = data.muted;
+        socket.send(JSON.stringify({
+          type: 'state',
+          state: 'muted',
+        }));
+        break;
+
+      case 'quota':
+        // Send current quota info
+        const usage = await getMonthlyUsageStats();
+        socket.send(JSON.stringify({
+          type: 'quota',
+          data: usage,
+        }));
         break;
 
       default:
@@ -92,7 +119,127 @@ export class VoiceService {
     }
   }
 
+  private async handleAudioData(
+    callId: string,
+    data: any,
+    socket: WebSocket,
+    call: CallMetadata
+  ): Promise<void> {
+    try {
+      // Check quota first
+      const quotaStatus = await checkWhisperQuota();
+      if (!quotaStatus.isAllowed) {
+        socket.send(JSON.stringify({
+          type: 'error',
+          message: `Quota exceeded: ${quotaStatus.reason}`,
+          quotaStatus,
+        }));
+        return;
+      }
+
+      // Get audio buffer from WebSocket data
+      const audioBuffer = Buffer.from(data.audio);
+      const durationSeconds = data.durationSeconds || 10; // Default estimate if not provided
+
+      // Send processing state
+      socket.send(JSON.stringify({
+        type: 'state',
+        state: 'processing',
+      }));
+
+      // Transcribe audio using Whisper
+      let transcript = '';
+      let costEstimate = 0;
+      
+      try {
+        const result = await transcribeAudio(audioBuffer, durationSeconds);
+        transcript = result.text;
+        costEstimate = result.costEstimate;
+        call.transcript += (call.transcript ? ' ' : '') + transcript;
+      } catch (error) {
+        console.error('Whisper transcription error:', error);
+        socket.send(JSON.stringify({
+          type: 'error',
+          message: `Transcription failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        }));
+        
+        // Send listening state so user can retry
+        socket.send(JSON.stringify({
+          type: 'state',
+          state: 'listening',
+        }));
+        return;
+      }
+
+      // Send transcript to user
+      socket.send(JSON.stringify({
+        type: 'transcript',
+        role: 'user',
+        text: transcript,
+        costEstimate,
+        timestamp: new Date().toISOString(),
+      }));
+
+      // Save user message to conversation
+      if (call.conversationId) {
+        await prisma.conversationMessage.create({
+          data: {
+            conversationId: call.conversationId,
+            role: 'user',
+            content: transcript,
+          },
+        });
+
+        // Generate booking response
+        const assistantResponse = await generateBookingResponse(transcript, call.conversationId);
+
+        // Send assistant response
+        socket.send(JSON.stringify({
+          type: 'transcript',
+          role: 'assistant',
+          text: assistantResponse,
+          timestamp: new Date().toISOString(),
+        }));
+
+        // Save assistant message
+        await prisma.conversationMessage.create({
+          data: {
+            conversationId: call.conversationId,
+            role: 'assistant',
+            content: assistantResponse,
+          },
+        });
+      }
+
+      // Send listening state to indicate ready for next input
+      socket.send(JSON.stringify({
+        type: 'state',
+        state: 'listening',
+      }));
+    } catch (error) {
+      console.error('Error handling audio data:', error);
+      socket.send(JSON.stringify({
+        type: 'error',
+        message: `Error processing audio: ${error instanceof Error ? error.message : 'Unknown error'}`,
+      }));
+    }
+  }
+
   cleanupCall(callId: string): void {
+    const call = this.activeCalls.get(callId);
+    if (call) {
+      // Update database with final state
+      prisma.voiceCall.update({
+        where: { callId },
+        data: {
+          status: 'ended',
+          durationSeconds: Math.round((Date.now() - call.startedAt.getTime()) / 1000),
+          transcript: call.transcript,
+          endedAt: new Date(),
+        },
+      }).catch((error) => console.error('Error updating call:', error));
+    }
+
     this.activeCalls.delete(callId);
   }
 }

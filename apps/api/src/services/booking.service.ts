@@ -1,4 +1,5 @@
-import crypto from 'crypto';
+import { prisma } from '../lib/database';
+import { generateBookingResponse } from '../lib/llm';
 
 interface AvailabilityResult {
   date: string;
@@ -30,8 +31,6 @@ interface ChatResult {
 }
 
 export class BookingService {
-  private appointments: Map<string, Appointment> = new Map();
-  private conversations: Map<string, string[]> = new Map();
 
   async checkAvailability(date: string): Promise<AvailabilityResult> {
     // TODO: Check actual availability from database/calendar system
@@ -52,62 +51,78 @@ export class BookingService {
   }
 
   async createAppointment(params: CreateAppointmentParams): Promise<Appointment> {
-    const appointment: Appointment = {
-      id: crypto.randomUUID(),
-      date: params.date,
-      time: params.time,
-      service: params.service,
-      status: 'confirmed',
-    };
+    const appointment = await prisma.appointment.create({
+      data: {
+        date: params.date,
+        time: params.time,
+        service: params.service,
+        status: 'confirmed',
+      },
+    });
 
-    this.appointments.set(appointment.id, appointment);
-    return appointment;
+    return {
+      id: appointment.id,
+      date: appointment.date,
+      time: appointment.time,
+      service: appointment.service,
+      status: appointment.status as 'confirmed' | 'pending' | 'cancelled',
+    };
   }
 
   async getAppointments(): Promise<Appointment[]> {
-    return Array.from(this.appointments.values());
+    const appointments = await prisma.appointment.findMany({
+      orderBy: { createdAt: 'desc' },
+    });
+
+    return appointments.map((apt) => ({
+      id: apt.id,
+      date: apt.date,
+      time: apt.time,
+      service: apt.service,
+      status: apt.status as 'confirmed' | 'pending' | 'cancelled',
+    }));
   }
 
   async chat(message: string, conversationId?: string): Promise<ChatResult> {
-    // TODO: Implement actual conversational AI
-    // - Use OpenAI/Claude for natural language understanding
-    // - Extract booking intent (date, time, service)
-    // - Check availability
-    // - Confirm bookings
-    // - Handle multi-turn conversations
-
-    const convId = conversationId || crypto.randomUUID();
-    
-    if (!this.conversations.has(convId)) {
-      this.conversations.set(convId, []);
-    }
-    
-    const history = this.conversations.get(convId)!;
-    history.push(`User: ${message}`);
-
-    // Mock response based on message content
-    let response = '';
-    const lowerMessage = message.toLowerCase();
-    
-    if (lowerMessage.includes('book') || lowerMessage.includes('appointment')) {
-      response = "I'd be happy to help you book an appointment! What service are you interested in? We offer consultations, follow-ups, and initial assessments.";
-    } else if (lowerMessage.includes('morning') || lowerMessage.includes('afternoon')) {
-      response = "Perfect! I have several slots available. Would Tuesday at 2:00 PM work for you?";
-    } else if (lowerMessage.includes('yes') || lowerMessage.includes('confirm')) {
-      response = "Excellent! Your appointment has been confirmed. You'll receive a confirmation email shortly. Is there anything else I can help you with?";
-    } else if (lowerMessage.includes('available') || lowerMessage.includes('availability')) {
-      response = "I can see we have availability on Monday, Wednesday, and Friday this week. Which day works best for you?";
+    // Get or create conversation
+    let conversation;
+    if (conversationId) {
+      conversation = await prisma.conversation.findUnique({
+        where: { id: conversationId },
+      });
+      if (!conversation) {
+        conversation = await prisma.conversation.create({ data: {} });
+      }
     } else {
-      response = "I'm here to help you schedule appointments. What day and time would work best for you?";
+      conversation = await prisma.conversation.create({ data: {} });
     }
 
-    history.push(`Assistant: ${response}`);
+    // Save user message
+    await prisma.conversationMessage.create({
+      data: {
+        conversationId: conversation.id,
+        role: 'user',
+        content: message,
+      },
+    });
+
+    // Generate response using LLM
+    const response = await generateBookingResponse(message, conversation.id);
+
+    // Save assistant message
+    const assistantMessage = await prisma.conversationMessage.create({
+      data: {
+        conversationId: conversation.id,
+        role: 'assistant',
+        content: response,
+      },
+    });
 
     return {
-      id: crypto.randomUUID(),
+      id: assistantMessage.id,
       message: response,
-      timestamp: new Date().toISOString(),
-      conversationId: convId,
+      timestamp: assistantMessage.createdAt.toISOString(),
+      conversationId: conversation.id,
     };
   }
 }

@@ -1,0 +1,38 @@
+{
+  "name": "agent",
+  "version": "1.0.0",
+  "description": "Agentic AI Assistant with autonomous tool use and decision-making",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "ts-node index.ts",
+    "dev:debug": "DEBUG=true ts-node index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "clean": "rm -rf dist"
+  },
+  "keywords": [
+    "ai",
+    "agent",
+    "agentic",
+    "langchain",
+    "ollama",
+    "autonomous",
+    "tool-use"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@langchain/core": "^1.1.19",
+    "@langchain/ollama": "^1.2.2",
+    "dotenv": "^17.2.4",
+    "fs-extra": "^11.3.3",
+    "langchain": "^1.2.17",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@types/fs-extra": "^11.0.4",
+    "@types/node": "^25.2.2",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3"
+  }
+}
