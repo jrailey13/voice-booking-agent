@@ -2,6 +2,60 @@ import { ollama } from './ollama';
 import { prisma } from './database';
 
 /**
+ * Parse user message to extract booking details
+ */
+function parseBookingDetails(message: string) {
+  const lower = message.toLowerCase();
+  
+  // Try to find date references
+  const datePatterns = [
+    /monday|tuesday|wednesday|thursday|friday|saturday|sunday/i,
+    /today|tomorrow|next week/i,
+    /\d{4}-\d{2}-\d{2}/,
+  ];
+  
+  let date = '';
+  for (const pattern of datePatterns) {
+    const match = lower.match(pattern);
+    if (match) {
+      date = match[0];
+      break;
+    }
+  }
+  
+  // Try to find time references
+  const timePatterns = [
+    /(\d{1,2}):(\d{2})\s*(am|pm)/i,
+    /(\d{1,2})\s*(am|pm)/i,
+    /(morning|afternoon|evening)/i,
+  ];
+  
+  let time = '';
+  for (const pattern of timePatterns) {
+    const match = lower.match(pattern);
+    if (match) {
+      time = match[0];
+      break;
+    }
+  }
+  
+  // Try to find service type
+  const serviceMatch = lower.match(/consultation|follow-?up|initial assessment|check-?up|appointment/i);
+  const service = serviceMatch ? serviceMatch[0] : '';
+  
+  return { date, time, service };
+}
+
+/**
+ * Check if user is confirming an appointment
+ */
+function isConfirmingAppointment(message: string): boolean {
+  const confirmationWords = ['yes', 'yep', 'yeah', 'sure', 'okay', 'ok', 'sounds good', 'perfect', 'great', 'works', 'absolutely', 'definitely', 'can do', 'let\'s do it', 'book it', 'confirm'];
+  const lower = message.toLowerCase();
+  return confirmationWords.some(word => lower.includes(word));
+}
+
+/**
  * Booking-specific LLM chat function
  * Handles conversational AI for appointment booking
  */
@@ -59,20 +113,25 @@ Always respond as if you're continuing a conversation with the customer.`;
       });
 
       clearTimeout(timeoutId);
-      return response.response.trim();
+      const llmResponse = response.response.trim();
+      return llmResponse;
     } catch (ollamaError) {
       console.warn('Ollama generation failed, using fallback response:', ollamaError);
       // Fallback response based on message content
       const lowerMessage = message.toLowerCase();
+      let fallbackResponse = '';
+      
       if (lowerMessage.includes('book') || lowerMessage.includes('appointment')) {
-        return "I'd be happy to help you book an appointment! What service are you interested in? We offer consultations, follow-ups, and initial assessments.";
+        fallbackResponse = "I'd be happy to help you book an appointment! What service are you interested in? We offer consultations, follow-ups, and initial assessments.";
       } else if (lowerMessage.includes('morning') || lowerMessage.includes('afternoon')) {
-        return "Perfect! I have several slots available. Would Tuesday at 2:00 PM work for you?";
+        fallbackResponse = "Perfect! I have several slots available. Would Tuesday at 2:00 PM work for you?";
       } else if (lowerMessage.includes('yes') || lowerMessage.includes('confirm')) {
-        return "Excellent! Your appointment has been confirmed. You'll receive a confirmation email shortly.";
+        fallbackResponse = "Great! Your booking preferences have been noted. Please click 'Create Appointment' to finalize.";
       } else {
-        return "I'm here to help you schedule appointments. What day and time would work best for you?";
+        fallbackResponse = "I'm here to help you schedule appointments. What day and time would work best for you?";
       }
+      
+      return fallbackResponse;
     }
   } catch (error) {
     console.error('Error generating booking response:', error);

@@ -36,8 +36,8 @@ const Index = () => {
                 </Link>
               </Button>
               <Button asChild size="lg" variant="outline">
-                <Link to="/booking-demo">
-                  Try Booking Agent
+                <Link to="/booking">
+                  Book an Appointment
                   <ArrowRight className="ml-2 h-4 w-4" />
                 </Link>
               </Button>
@@ -126,7 +126,7 @@ const Index = () => {
                   </li>
                 </ul>
                 <Button asChild className="w-full group-hover:gradient-bg transition-all">
-                  <Link to="/booking-demo">
+                  <Link to="/booking">
                     Try Demo
                     <ArrowRight className="ml-2 h-4 w-4" />
                   </Link>

@@ -33,19 +33,28 @@ interface ChatResult {
 export class BookingService {
 
   async checkAvailability(date: string): Promise<AvailabilityResult> {
-    // TODO: Check actual availability from database/calendar system
-    
-    // Mock time slots
+    // Define available time slots
     const timeSlots = [
-      '09:00 AM', '10:00 AM', '11:00 AM',
-      '01:00 PM', '02:00 PM', '03:00 PM', '04:00 PM',
+      '09:00 AM', '10:00 AM', '11:00 AM', '12:00 PM',
+      '01:00 PM', '02:00 PM', '03:00 PM', '04:00 PM', '05:00 PM',
     ];
+
+    // Get booked appointments for this date
+    const bookedAppointments = await prisma.appointment.findMany({
+      where: {
+        date: date,
+        status: { in: ['confirmed', 'pending'] },
+      },
+      select: { time: true },
+    });
+
+    const bookedTimes = new Set(bookedAppointments.map(apt => apt.time));
 
     return {
       date,
       availableSlots: timeSlots.map((time) => ({
         time,
-        available: Math.random() > 0.3, // Mock availability
+        available: !bookedTimes.has(time),
       })),
     };
   }

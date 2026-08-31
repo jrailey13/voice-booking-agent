@@ -47,6 +47,16 @@ interface VoiceCallResponse {
   websocketUrl: string;
 }
 
+interface VoiceQuotaResponse {
+  monthYear: string;
+  minutesUsed: number;
+  estimatedCost: number;
+  requestCount: number;
+  monthlyLimitUSD: number;
+  remainingBudget: number;
+  isLimited: boolean;
+}
+
 export const api = {
   // RAG endpoints
   rag: {
@@ -153,7 +163,6 @@ export const api = {
     startCall: async (): Promise<VoiceCallResponse> => {
       const response = await fetch(`${API_BASE_URL}/voice/start`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
       });
       
       if (!response.ok) {
@@ -173,6 +182,16 @@ export const api = {
       if (!response.ok) {
         throw new Error(`Call end failed: ${response.statusText}`);
       }
+    },
+
+    getQuota: async (): Promise<VoiceQuotaResponse> => {
+      const response = await fetch(`${API_BASE_URL}/voice/quota`);
+      
+      if (!response.ok) {
+        throw new Error(`Quota check failed: ${response.statusText}`);
+      }
+      
+      return response.json();
     },
   },
 };

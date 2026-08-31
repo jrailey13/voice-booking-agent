@@ -14,7 +14,7 @@ import { useToast } from "@/hooks/use-toast";
 
 interface Appointment {
   id: string;
-  date: Date;
+  date: string;
   time: string;
   service: string;
 }
@@ -32,11 +32,13 @@ export default function BookingDemo() {
   const [selectedDate, setSelectedDate] = useState<Date | undefined>(new Date());
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [conversationId, setConversationId] = useState<string | undefined>();
+  const [selectedService, setSelectedService] = useState<string>("");
+  const [selectedTime, setSelectedTime] = useState<string>("");
   
   const { toast } = useToast();
   const bookingChat = useBookingChat();
   const createAppointment = useCreateAppointment();
-  const { data: appointmentsData } = useAppointments();
+  const { data: appointmentsData, refetch: refetchAppointments } = useAppointments();
 
   const handleSendMessage = async (content: string) => {
     const userMessage: Message = {
@@ -81,7 +83,7 @@ export default function BookingDemo() {
   };
 
   // Get dates with appointments for calendar highlighting
-  const appointmentDates = appointments.map((apt) => apt.date);
+  const appointmentDates: Date[] = [];
 
   return (
     <Layout>
@@ -129,7 +131,7 @@ export default function BookingDemo() {
           <Card className="lg:col-span-2 flex flex-col">
             <CardHeader className="pb-3">
               <CardTitle className="text-lg">Chat with Booking Agent</CardTitle>
-              <CardDescription>Ask about availability or book an appointment</CardDescription>
+              <CardDescription>Ask about availability, then create appointment</CardDescription>
             </CardHeader>
             <CardContent className="flex-1 p-0 overflow-hidden">
               <ChatInterface
@@ -145,26 +147,77 @@ export default function BookingDemo() {
           <div className="space-y-6">
             <Card>
               <CardHeader className="pb-3">
-                <CardTitle className="text-lg">Calendar</CardTitle>
-                <CardDescription>View availability and appointments</CardDescription>
+                <CardTitle className="text-lg">Create Appointment</CardTitle>
+                <CardDescription>From your conversation</CardDescription>
               </CardHeader>
-              <CardContent>
-                <Calendar
-                  mode="single"
-                  selected={selectedDate}
-                  onSelect={setSelectedDate}
-                  className="rounded-md border pointer-events-auto"
-                  modifiers={{
-                    booked: appointmentDates,
+              <CardContent className="space-y-3">
+                <div>
+                  <label className="text-sm font-medium block mb-2">Service</label>
+                  <input
+                    type="text"
+                    value={selectedService}
+                    onChange={(e) => setSelectedService(e.target.value)}
+                    placeholder="e.g., consultation"
+                    className="w-full px-3 py-2 border rounded-md"
+                  />
+                </div>
+                <div>
+                  <label className="text-sm font-medium block mb-2">Date</label>
+                  <input
+                    type="date"
+                    value={selectedDate ? selectedDate.toISOString().split('T')[0] : ''}
+                    onChange={(e) => setSelectedDate(new Date(e.target.value))}
+                    className="w-full px-3 py-2 border rounded-md"
+                  />
+                </div>
+                <div>
+                  <label className="text-sm font-medium block mb-2">Time</label>
+                  <input
+                    type="text"
+                    value={selectedTime}
+                    onChange={(e) => setSelectedTime(e.target.value)}
+                    placeholder="e.g., 2:00 PM"
+                    className="w-full px-3 py-2 border rounded-md"
+                  />
+                </div>
+                <Button
+                  onClick={async () => {
+                    if (!selectedService || !selectedDate || !selectedTime) {
+                      toast({
+                        title: "Missing fields",
+                        description: "Please fill in service, date, and time",
+                        variant: "destructive",
+                      });
+                      return;
+                    }
+                    
+                    try {
+                      await createAppointment.mutateAsync({
+                        date: selectedDate.toISOString().split('T')[0],
+                        time: selectedTime,
+                        service: selectedService,
+                      });
+                      
+                      setSelectedService("");
+                      setSelectedTime("");
+                      await refetchAppointments();
+                      
+                      toast({
+                        title: "Appointment created!",
+                        description: `${selectedService} on ${selectedDate.toDateString()} at ${selectedTime}`,
+                      });
+                    } catch (error) {
+                      toast({
+                        title: "Failed to create appointment",
+                        description: "Please try again",
+                        variant: "destructive",
+                      });
+                    }
                   }}
-                  modifiersStyles={{
-                    booked: {
-                      backgroundColor: "hsl(var(--primary) / 0.1)",
-                      color: "hsl(var(--primary))",
-                      fontWeight: "bold",
-                    },
-                  }}
-                />
+                  className="w-full"
+                >
+                  Create Appointment
+                </Button>
               </CardContent>
             </Card>
 
@@ -174,13 +227,13 @@ export default function BookingDemo() {
                 <CardDescription>Your scheduled bookings</CardDescription>
               </CardHeader>
               <CardContent>
-                {appointments.length === 0 ? (
+                {!appointmentsData || appointmentsData.length === 0 ? (
                   <p className="text-sm text-muted-foreground text-center py-4">
                     No appointments yet
                   </p>
                 ) : (
                   <div className="space-y-3">
-                    {appointments.map((apt) => (
+                    {appointmentsData.map((apt) => (
                       <div
                         key={apt.id}
                         className="flex items-start gap-3 p-3 bg-muted/50 rounded-lg"
@@ -190,7 +243,7 @@ export default function BookingDemo() {
                           <p className="font-medium text-sm">{apt.service}</p>
                           <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1">
                             <CalendarDays className="h-3 w-3" />
-                            <span>{format(apt.date, "MMM d, yyyy")}</span>
+                            <span>{apt.date}</span>
                             <Clock className="h-3 w-3 ml-2" />
                             <span>{apt.time}</span>
                           </div>
