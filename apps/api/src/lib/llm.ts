@@ -2,60 +2,6 @@ import { ollama } from './ollama';
 import { prisma } from './database';
 
 /**
- * Parse user message to extract booking details
- */
-function parseBookingDetails(message: string) {
-  const lower = message.toLowerCase();
-  
-  // Try to find date references
-  const datePatterns = [
-    /monday|tuesday|wednesday|thursday|friday|saturday|sunday/i,
-    /today|tomorrow|next week/i,
-    /\d{4}-\d{2}-\d{2}/,
-  ];
-  
-  let date = '';
-  for (const pattern of datePatterns) {
-    const match = lower.match(pattern);
-    if (match) {
-      date = match[0];
-      break;
-    }
-  }
-  
-  // Try to find time references
-  const timePatterns = [
-    /(\d{1,2}):(\d{2})\s*(am|pm)/i,
-    /(\d{1,2})\s*(am|pm)/i,
-    /(morning|afternoon|evening)/i,
-  ];
-  
-  let time = '';
-  for (const pattern of timePatterns) {
-    const match = lower.match(pattern);
-    if (match) {
-      time = match[0];
-      break;
-    }
-  }
-  
-  // Try to find service type
-  const serviceMatch = lower.match(/consultation|follow-?up|initial assessment|check-?up|appointment/i);
-  const service = serviceMatch ? serviceMatch[0] : '';
-  
-  return { date, time, service };
-}
-
-/**
- * Check if user is confirming an appointment
- */
-function isConfirmingAppointment(message: string): boolean {
-  const confirmationWords = ['yes', 'yep', 'yeah', 'sure', 'okay', 'ok', 'sounds good', 'perfect', 'great', 'works', 'absolutely', 'definitely', 'can do', 'let\'s do it', 'book it', 'confirm'];
-  const lower = message.toLowerCase();
-  return confirmationWords.some(word => lower.includes(word));
-}
-
-/**
  * Booking-specific LLM chat function
  * Handles conversational AI for appointment booking
  */
