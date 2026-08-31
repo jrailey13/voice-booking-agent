@@ -240,10 +240,10 @@ All API calls include try-catch error handling with user-friendly toast notifica
 - ✅ Real API integration for document upload, query, and deletion
 - ✅ Toast notifications for success/failure
 
-### BookingDemo Component
-- ✅ Uses `useBookingChat()`, `useCreateAppointment()`, `useAppointments()` hooks
-- ✅ Maintains conversation context with `conversationId`
-- ✅ Toast notifications for errors
+### SimpleBooking Component
+- ✅ Uses `useAvailability()`, `useCreateAppointment()`, `useAppointments()` hooks
+- ✅ Calendar-based date/time selection against live availability
+- ✅ Toast notifications for success and errors
 
 ### VoiceAgent Component
 - ✅ Uses `useStartCall()`, `useEndCall()` hooks
@@ -263,7 +263,7 @@ All API calls include try-catch error handling with user-friendly toast notifica
 
 4. **Test each feature**:
    - RAG Demo: Upload a document and ask questions
-   - Booking Demo: Have a conversation with the booking agent
+   - Booking: Pick a date and time and confirm an appointment
    - Voice Agent: Start a call and test real-time transcription
 
 ## Backend Implementation Checklist
