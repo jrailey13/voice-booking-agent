@@ -101,20 +101,32 @@ Available times: 09:00 AM, 10:00 AM, 11:00 AM, 01:00 PM, 02:00 PM, 03:00 PM, 04:
 Always respond as if you're continuing a conversation with the customer.`;
 
     try {
-      // Try to generate using Ollama with a timeout
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
-
-      const response = await ollama.generate({
-        model: process.env.LLM_MODEL || 'gemma3',
-        prompt: conversationContext,
-        system: systemPrompt,
-        stream: false,
+      // Generate using Ollama, but fall back if it stalls past the timeout.
+      // ollama-js has no per-request abort signal, so race the call against a
+      // rejecting timer; a timeout rejects into the fallback branch below.
+      const TIMEOUT_MS = 10000;
+      let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+      const timeout = new Promise<never>((_, reject) => {
+        timeoutHandle = setTimeout(
+          () => reject(new Error('Ollama generation timed out')),
+          TIMEOUT_MS
+        );
       });
 
-      clearTimeout(timeoutId);
-      const llmResponse = response.response.trim();
-      return llmResponse;
+      try {
+        const response = await Promise.race([
+          ollama.generate({
+            model: process.env.LLM_MODEL || 'gemma3',
+            prompt: conversationContext,
+            system: systemPrompt,
+            stream: false,
+          }),
+          timeout,
+        ]);
+        return response.response.trim();
+      } finally {
+        clearTimeout(timeoutHandle);
+      }
     } catch (ollamaError) {
       console.warn('Ollama generation failed, using fallback response:', ollamaError);
       // Fallback response based on message content
