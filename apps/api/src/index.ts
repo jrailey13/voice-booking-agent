@@ -19,7 +19,7 @@ const start = async () => {
   try {
     // Register plugins
     await server.register(cors, {
-      origin: process.env.CORS_ORIGIN || 'http://localhost:5173',
+      origin: process.env.CORS_ORIGIN || 'http://localhost:8080',
       credentials: true,
     });
 
@@ -56,7 +56,7 @@ const start = async () => {
     await server.register(bookingRoutes, { prefix: '/api/booking' });
     await server.register(voiceRoutes, { prefix: '/api/voice' });
 
-    const port = parseInt(process.env.PORT || '3000', 10);
+    const port = parseInt(process.env.PORT || '3001', 10);
 
     await server.listen({ port, host: 'localhost' });
     console.log(`🚀 Server running at http://localhost:${port}`);
