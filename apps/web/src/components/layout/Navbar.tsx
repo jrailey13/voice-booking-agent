@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils";
 const navLinks = [
   { href: "/", label: "Home" },
   { href: "/rag-demo", label: "RAG Tool" },
-  { href: "/booking-demo", label: "Booking Agent" },
+  { href: "/booking", label: "Booking Agent" },
   { href: "/about", label: "About" },
 ];
 

@@ -131,7 +131,7 @@ export default function About() {
                   </li>
                 </ol>
                 <Button asChild className="w-full mt-6">
-                  <Link to="/booking-demo">
+                  <Link to="/booking">
                     Try Booking Demo
                     <ArrowRight className="ml-2 h-4 w-4" />
                   </Link>
@@ -254,7 +254,7 @@ export default function About() {
               </Link>
             </Button>
             <Button asChild size="lg" variant="outline">
-              <Link to="/booking-demo">
+              <Link to="/booking">
                 <Calendar className="mr-2 h-4 w-4" />
                 Booking Agent Demo
               </Link>
