@@ -1,6 +1,6 @@
 import crypto from 'crypto';
 import mammoth from 'mammoth';
-import pdfParse from 'pdf-parse';
+import { PDFParse } from 'pdf-parse';
 import { prisma } from '../lib/database';
 import { generateEmbedding, generateAnswer, cosineSimilarity } from '../lib/ollama';
 
@@ -63,12 +63,15 @@ export class RagService {
 
       // PDF files
       if (mimetype.includes('pdf') || filename.endsWith('.pdf')) {
+        const parser = new PDFParse({ data: buffer });
         try {
-          const data = await pdfParse(buffer);
-          return data.text;
+          const result = await parser.getText();
+          return result.text;
         } catch (error) {
           console.error('Error parsing PDF:', error);
           throw new Error(`Failed to parse PDF: ${filename}`);
+        } finally {
+          await parser.destroy();
         }
       }
 
