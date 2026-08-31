@@ -173,7 +173,7 @@ Response: 204 No Content
 
 ### Voice Agent WebSocket
 
-Connect to: `ws://localhost:3000/voice/{callId}`
+Connect to: `ws://localhost:3001/api/voice/{callId}`
 
 #### Server -> Client Messages
 
@@ -210,8 +210,8 @@ The client can send control messages:
 ### Development
 Create `.env.development`:
 ```env
-VITE_API_URL=http://localhost:3000/api
-VITE_WS_URL=ws://localhost:3000
+VITE_API_URL=http://localhost:3001/api
+VITE_WS_URL=ws://localhost:3001/api
 ```
 
 ### Production
@@ -252,7 +252,7 @@ All API calls include try-catch error handling with user-friendly toast notifica
 
 ## Testing the Integration
 
-1. **Start your backend server** (should run on `http://localhost:3000`)
+1. **Start your backend server** (should run on `http://localhost:3001`)
 
 2. **Update environment variables** if your backend runs on a different port
 
