@@ -50,7 +50,10 @@ Always respond as if you're continuing a conversation with the customer.`;
       // Generate using Ollama, but fall back if it stalls past the timeout.
       // ollama-js has no per-request abort signal, so race the call against a
       // rejecting timer; a timeout rejects into the fallback branch below.
-      const TIMEOUT_MS = 10000;
+      // Configurable so slower local hardware can actually reach the model.
+      // gemma3-4B on CPU can take ~15-20s per turn; a 10s cap silently forces
+      // every response into the scripted fallback below.
+      const TIMEOUT_MS = parseInt(process.env.OLLAMA_TIMEOUT_MS || '30000', 10);
       let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
       const timeout = new Promise<never>((_, reject) => {
         timeoutHandle = setTimeout(
