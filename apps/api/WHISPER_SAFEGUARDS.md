@@ -1,5 +1,10 @@
 # Voice Agent - Whisper Integration with Cost Safeguards
 
+> **Deprecated.** Speech-to-text now runs locally via transformers.js (see
+> `src/lib/stt.ts`), so there is no API cost and no key. The quota/usage code
+> described below is retained only as a usage stat and always reports $0.
+> This document describes the previous OpenAI Whisper integration.
+
 ## Overview
 
 The voice agent uses **OpenAI Whisper API** for speech-to-text transcription. To prevent unexpected charges, multiple safeguards are built into the system.
