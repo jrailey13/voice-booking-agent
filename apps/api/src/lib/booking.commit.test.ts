@@ -7,7 +7,12 @@ vi.mock('./database', () => ({
   prisma: {
     conversation: { findUnique: vi.fn(), update: vi.fn() },
     conversationMessage: { findMany: vi.fn() },
-    appointment: { findFirst: vi.fn(), create: vi.fn() },
+    appointment: {
+      findFirst: vi.fn(),
+      findUnique: vi.fn(),
+      create: vi.fn(),
+      update: vi.fn(),
+    },
   },
 }));
 
@@ -20,7 +25,9 @@ const mockConvFind = prisma.conversation.findUnique as unknown as ReturnType<typ
 const mockConvUpdate = prisma.conversation.update as unknown as ReturnType<typeof vi.fn>;
 const mockMsgFind = prisma.conversationMessage.findMany as unknown as ReturnType<typeof vi.fn>;
 const mockApptFind = prisma.appointment.findFirst as unknown as ReturnType<typeof vi.fn>;
+const mockApptGet = prisma.appointment.findUnique as unknown as ReturnType<typeof vi.fn>;
 const mockApptCreate = prisma.appointment.create as unknown as ReturnType<typeof vi.fn>;
+const mockApptUpdate = prisma.appointment.update as unknown as ReturnType<typeof vi.fn>;
 
 const READY = {
   date: '2026-10-03',
@@ -74,14 +81,77 @@ describe('maybeCommitBooking', () => {
     expect(mockApptCreate).not.toHaveBeenCalled();
   });
 
-  it('does not double-book a conversation already linked to an appointment', async () => {
+  it('does not create a second appointment for a fully-booked conversation', async () => {
     mockConvFind.mockResolvedValue({ id: 'conv-1', appointmentId: 'existing' });
+    // Already has name + contact — nothing left to enrich, so no LLM call.
+    mockApptGet.mockResolvedValue({
+      id: 'existing',
+      ...READY,
+      status: 'confirmed',
+    });
 
     const result = await maybeCommitBooking('conv-1');
 
     expect(result).toBeNull();
     expect(mockExtract).not.toHaveBeenCalled();
     expect(mockApptCreate).not.toHaveBeenCalled();
+  });
+
+  it('enriches an already-booked appointment when the name/contact arrive later', async () => {
+    // The first commit landed with no customer details (the model confirmed
+    // before the caller gave their name). A later turn supplies them.
+    mockConvFind.mockResolvedValue({ id: 'conv-1', appointmentId: 'appt-1' });
+    mockApptGet.mockResolvedValue({
+      id: 'appt-1',
+      date: '2026-10-03',
+      time: '02:00 PM',
+      service: 'consultation',
+      customerName: null,
+      customerContact: null,
+      status: 'confirmed',
+    });
+    mockExtract.mockResolvedValue(READY); // now includes Jane Doe / 555-0100
+    mockApptUpdate.mockResolvedValue({
+      id: 'appt-1',
+      ...READY,
+      status: 'confirmed',
+    });
+
+    const result = await maybeCommitBooking('conv-1');
+
+    expect(mockApptUpdate).toHaveBeenCalledWith({
+      where: { id: 'appt-1' },
+      data: { customerName: 'Jane Doe', customerContact: '555-0100' },
+    });
+    expect(mockApptCreate).not.toHaveBeenCalled(); // no double-booking
+    expect(result).toMatchObject({ customerName: 'Jane Doe', customerContact: '555-0100' });
+  });
+
+  it('does not re-write details that are already present', async () => {
+    mockConvFind.mockResolvedValue({ id: 'conv-1', appointmentId: 'appt-1' });
+    mockApptGet.mockResolvedValue({
+      id: 'appt-1',
+      date: '2026-10-03',
+      time: '02:00 PM',
+      service: 'consultation',
+      customerName: 'Jane Doe',
+      customerContact: null, // only contact is missing
+      status: 'confirmed',
+    });
+    mockExtract.mockResolvedValue(READY);
+    mockApptUpdate.mockResolvedValue({
+      id: 'appt-1',
+      ...READY,
+      status: 'confirmed',
+    });
+
+    await maybeCommitBooking('conv-1');
+
+    // Only the missing field is updated; the existing name is left untouched.
+    expect(mockApptUpdate).toHaveBeenCalledWith({
+      where: { id: 'appt-1' },
+      data: { customerContact: '555-0100' },
+    });
   });
 
   it('does not book a slot that is already taken', async () => {
