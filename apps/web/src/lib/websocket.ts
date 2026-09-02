@@ -6,9 +6,19 @@ export interface TranscriptData {
   timestamp: string;
 }
 
+export interface BookingData {
+  id: string;
+  date: string;
+  time: string;
+  service: string;
+  customerName: string | null;
+  customerContact: string | null;
+}
+
 export interface VoiceConnectionCallbacks {
   onTranscript?: (data: TranscriptData) => void;
   onStateChange?: (state: string) => void;
+  onBooking?: (data: BookingData) => void;
   onError?: (error: Error) => void;
   onClose?: () => void;
 }
@@ -39,6 +49,9 @@ export class VoiceConnection {
             break;
           case 'state':
             this.callbacks.onStateChange?.(data.state);
+            break;
+          case 'booking':
+            this.callbacks.onBooking?.(data.appointment);
             break;
           default:
             console.log('Unknown message type:', data.type);

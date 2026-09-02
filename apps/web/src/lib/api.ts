@@ -34,11 +34,21 @@ interface BookingAppointmentResponse {
   status: 'confirmed' | 'pending' | 'cancelled';
 }
 
+interface CommittedBooking {
+  id: string;
+  date: string;
+  time: string;
+  service: string;
+  customerName: string | null;
+  customerContact: string | null;
+}
+
 interface BookingChatResponse {
   id: string;
   message: string;
   timestamp: string;
   conversationId: string;
+  appointment?: CommittedBooking;
 }
 
 interface VoiceCallResponse {

@@ -5,11 +5,11 @@ import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
-import { Phone, PhoneOff, Mic, MicOff, AlertTriangle, Loader, DollarSign } from 'lucide-react';
+import { Phone, PhoneOff, Mic, MicOff, AlertTriangle, Loader, DollarSign, CalendarCheck } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useStartCall, useEndCall, useVoiceQuota } from '@/hooks/useVoiceCall';
 import { useAudioCapture } from '@/hooks/useAudioCapture';
-import { VoiceConnection, createVoiceConnection } from '@/lib/websocket';
+import { VoiceConnection, createVoiceConnection, BookingData } from '@/lib/websocket';
 import { elapsedSeconds } from '@/lib/audioDuration';
 import { useToast } from '@/hooks/use-toast';
 
@@ -28,6 +28,7 @@ export default function VoiceAgent() {
   const [transcript, setTranscript] = useState<TranscriptEntry[]>([]);
   const [callDuration, setCallDuration] = useState(0);
   const [callId, setCallId] = useState<string | null>(null);
+  const [booking, setBooking] = useState<BookingData | null>(null);
 
   const durationIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const connectionRef = useRef<VoiceConnection | null>(null);
@@ -83,6 +84,7 @@ export default function VoiceAgent() {
     setCallState('connecting');
     setTranscript([]);
     setCallDuration(0);
+    setBooking(null);
 
     try {
       const response = await startCall.mutateAsync();
@@ -101,6 +103,13 @@ export default function VoiceAgent() {
               description: 'Call connected. Click the microphone to record and send audio.',
             });
           }
+        },
+        onBooking: (appointment) => {
+          setBooking(appointment);
+          toast({
+            title: 'Appointment booked!',
+            description: `${appointment.service} on ${appointment.date} at ${appointment.time}`,
+          });
         },
         onError: (error) => {
           toast({
@@ -411,6 +420,7 @@ export default function VoiceAgent() {
                         setCallState('idle');
                         setTranscript([]);
                         setCallDuration(0);
+                        setBooking(null);
                       }}
                       className="flex-1 gap-2"
                       size="lg"
@@ -426,6 +436,29 @@ export default function VoiceAgent() {
 
           {/* Info Panel */}
           <div className="space-y-4">
+            {/* Confirmed Booking */}
+            {booking && (
+              <Card className="border-green-200 bg-green-50 dark:bg-green-950 dark:border-green-800">
+                <CardHeader>
+                  <CardTitle className="text-lg flex items-center gap-2">
+                    <CalendarCheck className="h-5 w-5 text-green-600" />
+                    Appointment Confirmed
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="text-sm space-y-1">
+                  <p><span className="text-muted-foreground">Service:</span> <span className="font-medium capitalize">{booking.service}</span></p>
+                  <p><span className="text-muted-foreground">Date:</span> <span className="font-medium">{booking.date}</span></p>
+                  <p><span className="text-muted-foreground">Time:</span> <span className="font-medium">{booking.time}</span></p>
+                  {booking.customerName && (
+                    <p><span className="text-muted-foreground">Name:</span> <span className="font-medium">{booking.customerName}</span></p>
+                  )}
+                  {booking.customerContact && (
+                    <p><span className="text-muted-foreground">Contact:</span> <span className="font-medium">{booking.customerContact}</span></p>
+                  )}
+                </CardContent>
+              </Card>
+            )}
+
             <Card>
               <CardHeader>
                 <CardTitle className="text-lg">How It Works</CardTitle>

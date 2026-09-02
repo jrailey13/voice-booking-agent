@@ -6,11 +6,21 @@ interface BookingChatParams {
   conversationId?: string;
 }
 
+interface CommittedBooking {
+  id: string;
+  date: string;
+  time: string;
+  service: string;
+  customerName: string | null;
+  customerContact: string | null;
+}
+
 interface BookingChatResponse {
   id: string;
   message: string;
   timestamp: string;
   conversationId: string;
+  appointment?: CommittedBooking;
 }
 
 export const useBookingChat = (): UseMutationResult<BookingChatResponse, Error, BookingChatParams> => {

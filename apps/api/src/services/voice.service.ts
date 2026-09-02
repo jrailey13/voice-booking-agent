@@ -3,6 +3,7 @@ import { WebSocket } from 'ws';
 import { prisma } from '../lib/database';
 import { transcribeAudio, checkWhisperQuota, getMonthlyUsageStats } from '../lib/whisper';
 import { generateBookingResponse } from '../lib/llm';
+import { maybeCommitBooking } from '../lib/booking.commit';
 
 interface StartCallResult {
   callId: string;
@@ -211,6 +212,17 @@ export class VoiceService {
             content: assistantResponse,
           },
         });
+
+        // If the conversation has reached a concrete, available booking, commit
+        // it and tell the client so it can surface the confirmed appointment.
+        const appointment = await maybeCommitBooking(call.conversationId);
+        if (appointment) {
+          socket.send(JSON.stringify({
+            type: 'booking',
+            appointment,
+            timestamp: new Date().toISOString(),
+          }));
+        }
       }
 
       // Send listening state to indicate ready for next input

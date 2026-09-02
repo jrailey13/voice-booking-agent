@@ -45,15 +45,17 @@ model QueryLog {
 }
 
 model Appointment {
-  id            String   @id @default(cuid())
-  date          String
-  time          String
-  service       String
-  status        String   @default("confirmed") // 'confirmed', 'pending', 'cancelled'
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id              String   @id @default(cuid())
+  date            String
+  time            String
+  service         String
+  customerName    String?
+  customerContact String?
+  status          String   @default("confirmed") // 'confirmed', 'pending', 'cancelled'
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 
-  conversations Conversation[]
+  conversations   Conversation[]
 
   @@map("appointments")
 }

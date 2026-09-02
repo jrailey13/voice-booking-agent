@@ -34,6 +34,12 @@ sequenceDiagram
         A->>O: prompt + last 10 turns
         O-->>A: reply
         A->>P: save assistant message
+        opt assistant confirmed a booking
+            A->>O: extract booking as JSON
+            O-->>A: {date, time, service, contact}
+            A->>P: create + link Appointment
+            A-->>B: booking confirmed
+        end
         A-->>B: transcript + reply
         A-->>B: state: listening
     end
@@ -129,7 +135,7 @@ No API keys are required — every model runs locally. On the first transcriptio
 Worth stating plainly rather than leaving to be discovered:
 
 - **Not a phone system.** Audio is captured from the browser microphone and streamed over a WebSocket. There is no Twilio, SIP, or PSTN integration, so this does not answer real phone calls.
-- **Booking dialogue is prompt-driven.** The model is steered by a system prompt and conversation history. There is no tool calling or structured slot filling, so extracted dates and times are only as reliable as the model's free-text response.
+- **Booking commit depends on the model's extraction.** Once the assistant confirms, a second JSON-mode model call extracts the date, time, service, and contact; the result is validated with Zod, dates and times are normalized with chrono and snapped to a real slot, and only then is the appointment written and linked to the conversation (idempotent per conversation). Availability is checked before the write, but the check-then-insert is not atomic, so concurrent commits could still collide. The extracted fields are only as reliable as the model's response.
 - **Availability is simplified.** Open slots are a fixed daily list minus already-booked times. No provider calendars, durations, buffers, or business-hours rules.
 - **Single-tenant and unauthenticated.** No accounts, no per-business isolation, no authorization on any route.
 - **Not deployed.** Local development only.

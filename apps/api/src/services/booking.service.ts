@@ -1,5 +1,6 @@
 import { prisma } from '../lib/database';
 import { generateBookingResponse } from '../lib/llm';
+import { maybeCommitBooking, CommittedBooking } from '../lib/booking.commit';
 
 interface AvailabilityResult {
   date: string;
@@ -28,6 +29,7 @@ interface ChatResult {
   message: string;
   timestamp: string;
   conversationId: string;
+  appointment?: CommittedBooking;
 }
 
 export class BookingService {
@@ -127,11 +129,16 @@ export class BookingService {
       },
     });
 
+    // If the conversation has reached a concrete, available booking, commit it.
+    // Returns null (and never throws) when there is nothing to book yet.
+    const appointment = await maybeCommitBooking(conversation.id);
+
     return {
       id: assistantMessage.id,
       message: response,
       timestamp: assistantMessage.createdAt.toISOString(),
       conversationId: conversation.id,
+      ...(appointment ? { appointment } : {}),
     };
   }
 }
