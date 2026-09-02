@@ -1,13 +1,14 @@
+// Load .env before any other module evaluates. Route imports below pull in
+// services (e.g. whisper.ts) that read process.env at module load, so dotenv
+// must run first — a plain `dotenv.config()` after these imports is too late.
+import 'dotenv/config';
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import multipart from '@fastify/multipart';
 import websocket from '@fastify/websocket';
-import dotenv from 'dotenv';
 import { ragRoutes } from './routes/rag';
 import { bookingRoutes } from './routes/booking';
 import { voiceRoutes } from './routes/voice';
-
-dotenv.config();
 
 const server = Fastify({
   logger: process.env.NODE_ENV === 'development' ? {
