@@ -2,7 +2,7 @@
 
 ## 📋 Before You Start
 - ✅ Ollama installed
-- ✅ `gemma2` and `nomic-embed-text` pulled from Ollama
+- ✅ `gemma3` and `nomic-embed-text` pulled from Ollama
 - ✅ You're in PowerShell
 
 ## Step 1️⃣ Start Ollama Server
@@ -77,7 +77,7 @@ You've built a working RAG system that:
 - 🔍 **Converts to vectors** using `nomic-embed-text`
 - 🧠 **Understands questions** using embeddings
 - 📊 **Finds relevant content** using similarity search
-- 💬 **Generates answers** using `gemma2` LLM
+- 💬 **Generates answers** using `gemma3` LLM
 - 📌 **Shows sources** where answers came from
 
 ---
@@ -102,7 +102,7 @@ ollama serve
 ```powershell
 # Pull them
 ollama pull nomic-embed-text
-ollama pull gemma2
+ollama pull gemma3
 ```
 
 ### Problem: "npm command not found"

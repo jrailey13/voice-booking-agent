@@ -9,7 +9,7 @@ You now have a complete RAG (Retrieval-Augmented Generation) system using Ollama
 #### 1. **`src/lib/ollama.ts`** (NEW)
 Core Ollama integration with utilities:
 - `generateEmbedding()` - Convert text to vectors using `nomic-embed-text`
-- `generateAnswer()` - Generate answers using `gemma2` LLM
+- `generateAnswer()` - Generate answers using `gemma3` LLM
 - `cosineSimilarity()` - Find similar documents
 - `checkOllamaHealth()` - Verify Ollama is running
 
@@ -32,7 +32,7 @@ Added Ollama configuration variables:
 ```
 OLLAMA_BASE_URL=http://localhost:11434
 EMBEDDING_MODEL=nomic-embed-text
-LLM_MODEL=gemma2
+LLM_MODEL=gemma3
 ```
 
 #### 5. **`OLLAMA_RAG_SETUP.md`** (NEW)
@@ -58,12 +58,12 @@ ollama list
 
 Should see:
 - `nomic-embed-text` ✓
-- `gemma2` or `gemma3` ✓
+- `gemma3` ✓
 
 If missing, pull them:
 ```powershell
 ollama pull nomic-embed-text
-ollama pull gemma2
+ollama pull gemma3
 ```
 
 ### Step 3: Setup & Start API
@@ -122,7 +122,7 @@ Return: Answer + Sources (with snippets)
 - **Quality**: Excellent for semantic search
 - **Size**: ~200MB
 
-### LLM Model: gemma2
+### LLM Model: gemma3
 - **Capability**: Mid-range LLM
 - **Speed**: Reasonable (2-10 seconds per answer)
 - **Size**: ~5GB
@@ -232,7 +232,7 @@ LOG_LEVEL=info                     # Logging level
 # Ollama
 OLLAMA_BASE_URL=http://localhost:11434  # Ollama server
 EMBEDDING_MODEL=nomic-embed-text       # Embedding model
-LLM_MODEL=gemma2                       # Answer generation model
+LLM_MODEL=gemma3                       # Answer generation model
 
 # CORS
 CORS_ORIGIN=http://localhost:5173     # Frontend origin

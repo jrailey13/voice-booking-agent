@@ -109,7 +109,7 @@ Requires Node, Postgres, and [Ollama](https://ollama.com).
 
 ```bash
 ollama serve
-ollama pull gemma2
+ollama pull gemma3
 ollama pull nomic-embed-text
 
 cd apps/api
