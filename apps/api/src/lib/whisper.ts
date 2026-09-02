@@ -1,14 +1,11 @@
-import fs from 'fs';
-import path from 'path';
-import OpenAI from 'openai';
 import { prisma } from './database';
+import { decodeToPcm16kMono } from './audio';
+import { transcribe } from './stt';
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
-
-// Whisper API pricing: $0.02 per minute of audio
-const WHISPER_COST_PER_MINUTE = 0.02;
+// Transcription runs locally via transformers.js (see ./stt), so it is free.
+// The cost/quota machinery below is retained as usage metrics but always
+// resolves to $0 — it is vestigial and can be removed in a later cleanup.
+const WHISPER_COST_PER_MINUTE = 0;
 const MONTHLY_LIMIT_USD = parseFloat(process.env.WHISPER_MONTHLY_LIMIT || '10');
 const MAX_FILE_SIZE_MB = 25; // Whisper API limit
 const MAX_AUDIO_DURATION_SECONDS = 3600; // 1 hour
@@ -82,9 +79,9 @@ export async function checkWhisperQuota(): Promise<QuotaStatus> {
 }
 
 /**
- * Transcribe audio using OpenAI Whisper API
- * @param audioBuffer - Audio file buffer
- * @param durationSeconds - Duration of audio in seconds (for cost calculation)
+ * Transcribe audio using the local Whisper model (transformers.js).
+ * @param audioBuffer - Audio file buffer (browser webm/opus, wav, …)
+ * @param durationSeconds - Duration of audio in seconds (for usage metrics)
  * @returns Transcription result
  */
 export async function transcribeAudio(
@@ -125,16 +122,13 @@ export async function transcribeAudio(
       );
     }
 
-    console.log(`📢 Transcribing audio: ${durationSeconds}s (~$${costEstimate.toFixed(4)})`);
+    console.log(`📢 Transcribing audio locally: ${durationSeconds}s`);
 
-    // Call Whisper API. The browser MediaRecorder produces webm/opus, and
-    // OpenAI keys the decoder off the filename extension — labeling opus bytes
-    // as .wav gets the file rejected as an invalid format.
-    const transcription = await openai.audio.transcriptions.create({
-      file: new File([audioBuffer], 'audio.webm', { type: 'audio/webm' }),
-      model: 'whisper-1',
-      language: 'en',
-    });
+    // Decode the browser's compressed audio to 16 kHz mono PCM, then run the
+    // local Whisper model. No network call, no key, no per-request cost.
+    const pcm = await decodeToPcm16kMono(audioBuffer);
+    const text = await transcribe(pcm);
+    const transcription = { text };
 
     // Update daily usage
     const today = new Date();
