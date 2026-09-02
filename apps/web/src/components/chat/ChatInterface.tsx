@@ -11,6 +11,7 @@ interface ChatInterfaceProps {
   showSources?: boolean;
   placeholder?: string;
   className?: string;
+  disabled?: boolean;
 }
 
 export function ChatInterface({
@@ -20,6 +21,7 @@ export function ChatInterface({
   showSources = false,
   placeholder,
   className,
+  disabled = false,
 }: ChatInterfaceProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -52,7 +54,7 @@ export function ChatInterface({
           {isTyping && <TypingIndicator />}
         </div>
       </ScrollArea>
-      <ChatInput onSend={onSend} disabled={isTyping} placeholder={placeholder} />
+      <ChatInput onSend={onSend} disabled={isTyping || disabled} placeholder={placeholder} />
     </div>
   );
 }

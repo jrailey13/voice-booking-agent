@@ -10,6 +10,7 @@ import { cn } from '@/lib/utils';
 import { useStartCall, useEndCall, useVoiceQuota } from '@/hooks/useVoiceCall';
 import { useAudioCapture } from '@/hooks/useAudioCapture';
 import { VoiceConnection, createVoiceConnection } from '@/lib/websocket';
+import { elapsedSeconds } from '@/lib/audioDuration';
 import { useToast } from '@/hooks/use-toast';
 
 type CallState = 'idle' | 'connecting' | 'connected' | 'recording' | 'processing' | 'error' | 'ended';
@@ -140,12 +141,16 @@ export default function VoiceAgent() {
     try {
       setCallState('recording');
 
+      const recordStartedAt = Date.now();
       await audioCapture.startRecording();
 
       // Record for 10 seconds (adjust as needed)
       await new Promise((resolve) => setTimeout(resolve, 10000));
 
       const audioBlob = await audioCapture.stopRecording();
+      // Actual elapsed recording time in seconds. Codec-independent, unlike
+      // estimating from the compressed Opus blob size.
+      const durationSeconds = elapsedSeconds(recordStartedAt, Date.now());
 
       if (!audioBlob || audioBlob.size === 0) {
         toast({
@@ -163,13 +168,12 @@ export default function VoiceAgent() {
       const reader = new FileReader();
       reader.onload = () => {
         const base64Audio = (reader.result as string).split(',')[1];
-        const durationSeconds = audioBlob.size / (44100 * 2); // Rough estimate
 
         // Send audio via WebSocket
         connectionRef.current?.send({
           type: 'audio',
           audio: base64Audio,
-          durationSeconds: Math.max(1, Math.round(durationSeconds)),
+          durationSeconds,
         });
 
         setCallState('connected');

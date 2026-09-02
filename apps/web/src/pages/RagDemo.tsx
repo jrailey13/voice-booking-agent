@@ -63,6 +63,17 @@ export default function RagDemo() {
   };
 
   const handleSendMessage = async (content: string) => {
+    // The query endpoint requires at least one document to search against.
+    // Guard here so an empty-fileIds request never reaches the API as a
+    // cryptic "Query failed" — tell the user what to do instead.
+    if (files.length === 0) {
+      toast({
+        title: "No documents yet",
+        description: "Upload a document before asking a question.",
+      });
+      return;
+    }
+
     const userMessage: Message = {
       id: crypto.randomUUID(),
       role: "user",
@@ -152,6 +163,7 @@ export default function RagDemo() {
                 onSend={handleSendMessage}
                 isTyping={isTyping}
                 showSources={true}
+                disabled={files.length === 0}
                 placeholder={
                   files.length > 0
                     ? "Ask a question about your documents..."
