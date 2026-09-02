@@ -137,8 +137,10 @@ export class VoiceService {
         return;
       }
 
-      // Get audio buffer from WebSocket data
-      const audioBuffer = Buffer.from(data.audio);
+      // Get audio buffer from WebSocket data. The client sends the audio as a
+      // base64 string, so it MUST be decoded as base64 — Buffer.from(str)
+      // defaults to utf-8 and would corrupt every byte before Whisper sees it.
+      const audioBuffer = Buffer.from(data.audio, 'base64');
       const durationSeconds = data.durationSeconds || 10; // Default estimate if not provided
 
       // Send processing state

@@ -127,9 +127,11 @@ export async function transcribeAudio(
 
     console.log(`📢 Transcribing audio: ${durationSeconds}s (~$${costEstimate.toFixed(4)})`);
 
-    // Call Whisper API
+    // Call Whisper API. The browser MediaRecorder produces webm/opus, and
+    // OpenAI keys the decoder off the filename extension — labeling opus bytes
+    // as .wav gets the file rejected as an invalid format.
     const transcription = await openai.audio.transcriptions.create({
-      file: new File([audioBuffer], 'audio.wav', { type: 'audio/wav' }),
+      file: new File([audioBuffer], 'audio.webm', { type: 'audio/webm' }),
       model: 'whisper-1',
       language: 'en',
     });
