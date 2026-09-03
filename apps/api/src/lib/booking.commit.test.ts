@@ -154,6 +154,95 @@ describe('maybeCommitBooking', () => {
     });
   });
 
+  it('applies a later correction to a wrong (mis-heard) name', async () => {
+    // The first commit captured a mis-transcribed name; the caller then spells
+    // it out to correct it. The stored value must be overwritten, not kept.
+    mockConvFind.mockResolvedValue({ id: 'conv-1', appointmentId: 'appt-1' });
+    mockMsgFind.mockResolvedValue([
+      { role: 'user', content: 'My last name is spelled R-A-I-L-E-Y, please fix that' },
+      { role: 'assistant', content: 'Sure, let me update that for you.' }, // no confirmation cue
+    ]);
+    mockApptGet.mockResolvedValue({
+      id: 'appt-1',
+      date: '2026-10-03',
+      time: '02:00 PM',
+      service: 'consultation',
+      customerName: 'Jameson Reley', // the mis-heard name
+      customerContact: null,
+      status: 'confirmed',
+    });
+    mockExtract.mockResolvedValue({
+      date: '2026-10-03',
+      time: '02:00 PM',
+      service: 'consultation',
+      customerName: 'Jameson Railey', // corrected
+      customerContact: null,
+    });
+    mockApptUpdate.mockResolvedValue({
+      id: 'appt-1',
+      date: '2026-10-03',
+      time: '02:00 PM',
+      service: 'consultation',
+      customerName: 'Jameson Railey',
+      customerContact: null,
+      status: 'confirmed',
+    });
+
+    const result = await maybeCommitBooking('conv-1');
+
+    expect(mockApptUpdate).toHaveBeenCalledWith({
+      where: { id: 'appt-1' },
+      data: { customerName: 'Jameson Railey' },
+    });
+    expect(result).toMatchObject({ customerName: 'Jameson Railey' });
+  });
+
+  it('re-checks details on a correction cue even when nothing is missing', async () => {
+    // Both fields are already set, so the missing-field path would skip the LLM.
+    // A correction cue in the latest turn must still trigger a re-extraction.
+    mockConvFind.mockResolvedValue({ id: 'conv-1', appointmentId: 'appt-1' });
+    mockMsgFind.mockResolvedValue([
+      { role: 'user', content: 'Actually, my number should be 555-0199' },
+      { role: 'assistant', content: "Done — you're all set." },
+    ]);
+    mockApptGet.mockResolvedValue({
+      id: 'appt-1',
+      ...READY, // name + contact both present (555-0100)
+      status: 'confirmed',
+    });
+    mockExtract.mockResolvedValue({ ...READY, customerContact: '555-0199' });
+    mockApptUpdate.mockResolvedValue({
+      id: 'appt-1',
+      ...READY,
+      customerContact: '555-0199',
+      status: 'confirmed',
+    });
+
+    await maybeCommitBooking('conv-1');
+
+    expect(mockExtract).toHaveBeenCalledOnce();
+    expect(mockApptUpdate).toHaveBeenCalledWith({
+      where: { id: 'appt-1' },
+      data: { customerContact: '555-0199' },
+    });
+  });
+
+  it('leaves a fully-booked conversation alone when there is no correction cue', async () => {
+    // Both details present and the latest turn is ordinary chatter → no LLM call.
+    mockConvFind.mockResolvedValue({ id: 'conv-1', appointmentId: 'appt-1' });
+    mockMsgFind.mockResolvedValue([
+      { role: 'user', content: 'great, thank you so much!' },
+      { role: 'assistant', content: "You're welcome!" },
+    ]);
+    mockApptGet.mockResolvedValue({ id: 'appt-1', ...READY, status: 'confirmed' });
+
+    const result = await maybeCommitBooking('conv-1');
+
+    expect(result).toBeNull();
+    expect(mockExtract).not.toHaveBeenCalled();
+    expect(mockApptUpdate).not.toHaveBeenCalled();
+  });
+
   it('does not book a slot that is already taken', async () => {
     mockExtract.mockResolvedValue(READY);
     mockApptFind.mockResolvedValue({ id: 'other', date: '2026-10-03', time: '02:00 PM' });

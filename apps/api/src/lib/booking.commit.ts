@@ -24,6 +24,14 @@ const CONTEXT_TURNS = 10;
 const CONFIRMATION_CUE =
   /\b(booked|confirm(?:ed)?|scheduled|reserv(?:e|ed)|all set|you'?re set|see you|locked in)\b/i;
 
+// A cheap signal that the caller is amending a detail (e.g. correcting a
+// mis-heard name). Used to justify a re-extraction on an already-booked
+// conversation even when no field is blank. False positives only cost an extra
+// extraction call — they never corrupt data, since enrichment only overwrites
+// with a different, non-null extracted value.
+const CORRECTION_CUE =
+  /\b(actually|instead|correct(?:ion|ed)?|fix|change|wrong|mis(?:heard|spelled|spelt)|spell(?:ed|ing|s)?|should be|supposed to be)\b/i;
+
 function assistantConfirmed(
   messages: Array<{ role: string; content: string }>
 ): boolean {
@@ -59,6 +67,15 @@ function renderTranscript(messages: Array<{ role: string; content: string }>): s
     .join('\n');
 }
 
+function lastUserMessage(
+  messages: Array<{ role: string; content: string }>
+): string {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].role === 'user') return messages[i].content;
+  }
+  return '';
+}
+
 /**
  * Inspect a conversation and reconcile it with the appointment table. If the
  * conversation has reached a concrete, available booking it is created and
@@ -83,13 +100,16 @@ export async function maybeCommitBooking(
       orderBy: { createdAt: 'asc' },
       take: CONTEXT_TURNS,
     });
-    // Cheap gate: don't spend an extraction call until the assistant confirms.
-    if (!assistantConfirmed(messages)) return null;
 
-    // Already booked: only work left is back-filling missing customer details.
+    // Already booked: the only work left is capturing or correcting customer
+    // details. This is not gated by the confirmation cue — a correction ("fix
+    // my name") often comes without one. enrichBooking runs its own cheap gate.
     if (conversation.appointmentId) {
       return enrichBooking(conversation.appointmentId, messages, ref);
     }
+
+    // Cheap gate: don't spend an extraction call until the assistant confirms.
+    if (!assistantConfirmed(messages)) return null;
 
     const booking = await extractBooking(renderTranscript(messages), ref);
     if (!booking) return null;
@@ -128,10 +148,13 @@ export async function maybeCommitBooking(
 }
 
 /**
- * Back-fill a name/contact onto an appointment that was committed before the
- * caller supplied them. Never overwrites a value already present, never changes
- * the date/time/service, and skips the LLM call entirely once both details are
- * already on record.
+ * Reconcile the customer details on an already-committed appointment with what
+ * the conversation now says. Fills blanks, and applies genuine corrections
+ * (e.g. a name the caller re-spells after a mis-hear). Never nulls out a known
+ * value, never rewrites a value to itself, and never touches date/time/service.
+ *
+ * To stay cheap it only spends an extraction call when there is a blank to fill
+ * or the latest turn signals a correction — otherwise it does nothing.
  */
 async function enrichBooking(
   appointmentId: string,
@@ -140,14 +163,22 @@ async function enrichBooking(
 ): Promise<CommittedBooking | null> {
   const appt = await prisma.appointment.findUnique({ where: { id: appointmentId } });
   if (!appt) return null;
-  if (appt.customerName && appt.customerContact) return null; // nothing to add
+
+  const missingDetails = !appt.customerName || !appt.customerContact;
+  const correcting = CORRECTION_CUE.test(lastUserMessage(messages));
+  if (!missingDetails && !correcting) return null; // nothing to do — skip the LLM
 
   const booking = await extractBooking(renderTranscript(messages), ref);
   if (!booking) return null;
 
+  // Write a field only when extraction yields a non-null value that differs
+  // from what's stored: this both fills blanks and applies corrections without
+  // ever clobbering a good value or rewriting it to the same thing.
   const data: { customerName?: string; customerContact?: string } = {};
-  if (!appt.customerName && booking.customerName) data.customerName = booking.customerName;
-  if (!appt.customerContact && booking.customerContact) {
+  if (booking.customerName && booking.customerName !== appt.customerName) {
+    data.customerName = booking.customerName;
+  }
+  if (booking.customerContact && booking.customerContact !== appt.customerContact) {
     data.customerContact = booking.customerContact;
   }
   if (Object.keys(data).length === 0) return null; // no new details
