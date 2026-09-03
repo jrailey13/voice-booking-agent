@@ -137,3 +137,7 @@ dist
 # Vite logs files
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
+
+# Captured voice fixtures (real mic audio + transcripts) — may contain PII.
+# Keep local by default; commit a chosen clean clip deliberately if needed.
+apps/api/test/fixtures/audio/

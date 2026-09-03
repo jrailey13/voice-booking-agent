@@ -1,4 +1,6 @@
 import crypto from 'crypto';
+import { promises as fs } from 'fs';
+import path from 'path';
 import { WebSocket } from 'ws';
 import { prisma } from '../lib/database';
 import { transcribeAudio, checkWhisperQuota, getMonthlyUsageStats } from '../lib/whisper';
@@ -150,12 +152,20 @@ export class VoiceService {
         state: 'processing',
       }));
 
+      // Per-stage latency instrumentation. The perceived "how long until it
+      // answers" number is sttMs + llmMs (+ commitMs on the confirming turn);
+      // these are logged so a real run yields a measured figure, not a guess.
+      const turnStart = Date.now();
+
       // Transcribe audio using Whisper
       let transcript = '';
       let costEstimate = 0;
-      
+      let sttMs = 0;
+
       try {
+        const sttStart = Date.now();
         const result = await transcribeAudio(audioBuffer, durationSeconds);
+        sttMs = Date.now() - sttStart;
         transcript = result.text;
         costEstimate = result.costEstimate;
         call.transcript += (call.transcript ? ' ' : '') + transcript;
@@ -173,6 +183,10 @@ export class VoiceService {
         }));
         return;
       }
+
+      // Dev-only: when CAPTURE_AUDIO=1, persist each clip (and what Whisper
+      // heard) so real UI turns become replayable STT fixtures. No-op otherwise.
+      await this.captureFixture(callId, audioBuffer, transcript);
 
       // Send transcript to user
       socket.send(JSON.stringify({
@@ -194,7 +208,9 @@ export class VoiceService {
         });
 
         // Generate booking response
+        const llmStart = Date.now();
         const assistantResponse = await generateBookingResponse(transcript, call.conversationId);
+        const llmMs = Date.now() - llmStart;
 
         // Send assistant response
         socket.send(JSON.stringify({
@@ -215,7 +231,9 @@ export class VoiceService {
 
         // If the conversation has reached a concrete, available booking, commit
         // it and tell the client so it can surface the confirmed appointment.
+        const commitStart = Date.now();
         const appointment = await maybeCommitBooking(call.conversationId);
+        const commitMs = Date.now() - commitStart;
         if (appointment) {
           socket.send(JSON.stringify({
             type: 'booking',
@@ -223,6 +241,13 @@ export class VoiceService {
             timestamp: new Date().toISOString(),
           }));
         }
+
+        // The user-perceived latency is response-start after they stop talking:
+        // STT + LLM, plus the extraction pass only on the turn that commits.
+        console.log(
+          `⏱️  turn latency: stt=${sttMs}ms llm=${llmMs}ms commit=${commitMs}ms ` +
+            `total=${Date.now() - turnStart}ms`
+        );
       }
 
       // Send listening state to indicate ready for next input
@@ -236,6 +261,31 @@ export class VoiceService {
         type: 'error',
         message: `Error processing audio: ${error instanceof Error ? error.message : 'Unknown error'}`,
       }));
+    }
+  }
+
+  /**
+   * Dev-only fixture capture. Gated behind CAPTURE_AUDIO=1 so it is inert in
+   * normal runs. Writes the raw clip the browser sent (webm/opus — the exact
+   * bytes the decode+STT path consumes) plus a sidecar of what Whisper heard,
+   * so a real UI turn can be replayed as a deterministic STT test. Best-effort:
+   * a capture failure must never break the call.
+   */
+  private async captureFixture(
+    callId: string,
+    audioBuffer: Buffer,
+    transcript: string
+  ): Promise<void> {
+    if (process.env.CAPTURE_AUDIO !== '1') return;
+    try {
+      const dir = path.join(process.cwd(), 'test', 'fixtures', 'audio');
+      await fs.mkdir(dir, { recursive: true });
+      const stamp = `${Date.now()}-${callId.slice(0, 8)}`;
+      await fs.writeFile(path.join(dir, `${stamp}.webm`), audioBuffer);
+      await fs.writeFile(path.join(dir, `${stamp}.txt`), transcript, 'utf8');
+      console.log(`🎙️  captured fixture ${stamp} — heard: "${transcript}"`);
+    } catch (error) {
+      console.error('Fixture capture failed (ignored):', error);
     }
   }
 
