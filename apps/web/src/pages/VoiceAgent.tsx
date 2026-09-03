@@ -32,6 +32,7 @@ export default function VoiceAgent() {
 
   const durationIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const connectionRef = useRef<VoiceConnection | null>(null);
+  const recordStartRef = useRef<number>(0);
 
   const { toast } = useToast();
   const startCall = useStartCall();
@@ -96,12 +97,18 @@ export default function VoiceAgent() {
           addTranscript(data.role, data.text, (data as any).costEstimate);
         },
         onStateChange: (state) => {
+          console.log('[voice] server state:', state);
           if (state === 'connected') {
             setCallState('connected');
             toast({
               title: 'Connected',
-              description: 'Call connected. Click the microphone to record and send audio.',
+              description: 'Click Record, speak, then click Stop & Send.',
             });
+          } else if (state === 'processing') {
+            setCallState('processing');
+          } else if (state === 'listening') {
+            // Server finished this turn (reply sent, or it errored and recovered).
+            setCallState('connected');
           }
         },
         onBooking: (appointment) => {
@@ -127,6 +134,19 @@ export default function VoiceAgent() {
       });
 
       connectionRef.current = connection;
+
+      // Prime the mic now so the first recording can't stall on a permission
+      // prompt (and any block surfaces immediately, not mid-record).
+      const micOk = await audioCapture.requestPermission();
+      if (!micOk) {
+        toast({
+          title: 'Microphone Unavailable',
+          description:
+            audioCapture.error ??
+            'Could not access your microphone. Check Windows mic privacy settings and the browser mic permission.',
+          variant: 'destructive',
+        });
+      }
     } catch (error) {
       toast({
         title: 'Call Start Failed',
@@ -137,11 +157,13 @@ export default function VoiceAgent() {
     }
   };
 
-  const handleRecordAndSend = async () => {
+  // Manual push-to-talk: start recording on click, keep going until the user
+  // clicks Stop & Send. No fixed window, and an escape hatch at every step.
+  const handleStartRecording = async () => {
     if (!connectionRef.current?.isConnected()) {
       toast({
         title: 'Not Connected',
-        description: 'WebSocket connection is not established',
+        description: 'WebSocket connection is not established.',
         variant: 'destructive',
       });
       return;
@@ -149,22 +171,29 @@ export default function VoiceAgent() {
 
     try {
       setCallState('recording');
-
-      const recordStartedAt = Date.now();
+      recordStartRef.current = Date.now();
       await audioCapture.startRecording();
+      console.log('[voice] recording… click Stop & Send when done');
+    } catch (error) {
+      // startRecording rethrows on failure — surface it instead of freezing.
+      toast({
+        title: 'Microphone Error',
+        description: error instanceof Error ? error.message : 'Unknown error',
+        variant: 'destructive',
+      });
+      setCallState('connected');
+    }
+  };
 
-      // Record for 10 seconds (adjust as needed)
-      await new Promise((resolve) => setTimeout(resolve, 10000));
-
+  const handleStopAndSend = async () => {
+    try {
       const audioBlob = await audioCapture.stopRecording();
-      // Actual elapsed recording time in seconds. Codec-independent, unlike
-      // estimating from the compressed Opus blob size.
-      const durationSeconds = elapsedSeconds(recordStartedAt, Date.now());
+      const durationSeconds = elapsedSeconds(recordStartRef.current, Date.now());
 
       if (!audioBlob || audioBlob.size === 0) {
         toast({
           title: 'No Audio Captured',
-          description: 'Please try recording again',
+          description: 'Nothing was recorded — check your mic and try again.',
           variant: 'destructive',
         });
         setCallState('connected');
@@ -173,21 +202,30 @@ export default function VoiceAgent() {
 
       setCallState('processing');
 
-      // Convert blob to base64
       const reader = new FileReader();
       reader.onload = () => {
         const base64Audio = (reader.result as string).split(',')[1];
-
-        // Send audio via WebSocket
+        console.log(
+          '[voice] sending audio frame — base64 len =',
+          base64Audio?.length,
+          'duration =',
+          durationSeconds
+        );
         connectionRef.current?.send({
           type: 'audio',
           audio: base64Audio,
           durationSeconds,
         });
-
+        // Stay in 'processing' until the server sends 'listening'.
+      };
+      reader.onerror = () => {
+        toast({
+          title: 'Encoding Error',
+          description: 'Failed to encode the recording.',
+          variant: 'destructive',
+        });
         setCallState('connected');
       };
-
       reader.readAsDataURL(audioBlob);
     } catch (error) {
       toast({
@@ -372,23 +410,12 @@ export default function VoiceAgent() {
                   {callState === 'connected' && (
                     <>
                       <Button
-                        onClick={handleRecordAndSend}
-                        disabled={audioCapture.isRecording}
+                        onClick={handleStartRecording}
                         className="flex-1 gap-2"
                         size="lg"
-                        variant={audioCapture.isRecording ? 'destructive' : 'default'}
                       >
-                        {audioCapture.isRecording ? (
-                          <>
-                            <Loader className="h-4 w-4 animate-spin" />
-                            Recording...
-                          </>
-                        ) : (
-                          <>
-                            <Mic className="h-4 w-4" />
-                            Record & Send (10s)
-                          </>
-                        )}
+                        <Mic className="h-4 w-4" />
+                        Record
                       </Button>
                       <Button
                         onClick={handleEndCall}
@@ -402,15 +429,37 @@ export default function VoiceAgent() {
                     </>
                   )}
 
-                  {(callState === 'recording' || callState === 'processing') && (
+                  {callState === 'recording' && (
+                    <>
+                      <Button
+                        onClick={handleStopAndSend}
+                        variant="destructive"
+                        className="flex-1 gap-2 animate-pulse"
+                        size="lg"
+                      >
+                        <MicOff className="h-4 w-4" />
+                        Stop &amp; Send
+                      </Button>
+                      <Button
+                        onClick={handleEndCall}
+                        variant="outline"
+                        className="gap-2"
+                        size="lg"
+                      >
+                        <PhoneOff className="h-4 w-4" />
+                        End Call
+                      </Button>
+                    </>
+                  )}
+
+                  {callState === 'processing' && (
                     <Button
-                      onClick={handleEndCall}
-                      variant="destructive"
+                      disabled
                       className="flex-1 gap-2"
                       size="lg"
                     >
-                      <PhoneOff className="h-4 w-4" />
-                      End Call
+                      <Loader className="h-4 w-4 animate-spin" />
+                      Processing…
                     </Button>
                   )}
 
@@ -470,7 +519,7 @@ export default function VoiceAgent() {
                 </div>
                 <div>
                   <p className="font-semibold mb-1">2. Record Audio</p>
-                  <p className="text-muted-foreground">Click microphone to record a 10-second message</p>
+                  <p className="text-muted-foreground">Click Record, speak, then click Stop &amp; Send</p>
                 </div>
                 <div>
                   <p className="font-semibold mb-1">3. Get Response</p>

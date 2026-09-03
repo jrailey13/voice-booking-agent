@@ -76,8 +76,15 @@ export class VoiceConnection {
   send(data: any): void {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify(data));
+      console.log('[ws] sent', data?.type, '- readyState OPEN');
     } else {
-      console.error('WebSocket is not connected');
+      console.error(
+        '[ws] NOT sent — socket not open (readyState =',
+        this.ws?.readyState,
+        'for type',
+        data?.type,
+        ')'
+      );
     }
   }
 
