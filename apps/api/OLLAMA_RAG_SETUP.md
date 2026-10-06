@@ -125,66 +125,31 @@ curl -X DELETE http://localhost:3000/api/rag/documents/550e8400-e29b-41d4-a716-4
 
 ## How It Works
 
-1. **Upload**: 
-   - Text is extracted from the document
-   - Split into 500-character chunks with 100-character overlap
-   - Each chunk is embedded using `nomic-embed-text`
-   - Embeddings and chunks are stored in memory
+The pipeline is built from LangChain parts. See [`OLLAMA_RAG_README.md`](../../OLLAMA_RAG_README.md) for the full walkthrough.
 
-2. **Query**:
-   - Question is converted to an embedding
-   - Cosine similarity finds top 5 relevant chunks
-   - Relevant chunks become context for the LLM
-   - `gemma2` generates an answer based on context
-   - Sources are returned
+1. **Upload**
+   - Text is extracted from TXT, PDF (`pdf-parse`) or DOCX (`mammoth`)
+   - `RecursiveCharacterTextSplitter` splits it into chunks of at most 500 characters with 100 characters of overlap, preferring paragraph, line and word boundaries
+   - Each chunk is embedded with `nomic-embed-text` (`OllamaEmbeddings`)
+   - The document and its chunks are written to Postgres (`rag_documents`, `rag_chunks`) in one transaction
 
-3. **Memory Storage**:
-   - Currently uses in-memory Map (resets on restart)
-   - For production, integrate with:
-     - **Persistent Vector DB**: Pinecone, Weaviate, Milvus, or ChromaDB
-     - **Document Storage**: PostgreSQL, MongoDB
+2. **Query**
+   - The question is embedded, and the 5 most similar chunks from the selected files are found by cosine similarity
+   - Those chunks become the context for the LLM (`LLM_MODEL`, default `gemma3`)
+   - The answer is returned with its source documents and snippets
 
 ## Performance Tips
 
-- Adjust `CHUNK_SIZE` (default: 500) for better context coverage
-- Adjust `TOP_K` (default: 5) to control how many chunks are used
-- For large documents, consider streaming with Ollama
+- `CHUNK_SIZE`, `CHUNK_OVERLAP` and `TOP_K` are constants in `src/services/rag.service.ts`
+- Similarity is computed in process over the selected files' chunks. For a large corpus, move to pgvector (see `docs/langchain-architecture.md` §9)
 
 ## Production Improvements
 
-### 1. Add File Format Support
-
-```bash
-npm install pdf-parse mammoth
-```
-
-Update `rag.service.ts` to handle PDF/DOCX:
-
-```typescript
-private extractText(buffer: Buffer, mimetype: string): string {
-  if (mimetype.includes('pdf')) {
-    return pdf.parse(buffer); // Returns promise
-  }
-  if (mimetype.includes('wordprocessingml')) {
-    return mammoth.extractRawText({ buffer });
-  }
-  return buffer.toString('utf-8');
-}
-```
-
-### 2. Add Database Persistence
-
-```bash
-npm install @prisma/client prisma
-```
-
-Store chunks in a database instead of Map.
-
-### 3. Implement Streaming for Long Documents
+### 1. Implement Streaming for Long Documents
 
 Use Ollama's stream API for real-time chunk processing.
 
-### 4. Add Query Caching
+### 2. Add Query Caching
 
 Cache question embeddings and answers to improve response time.
 
