@@ -86,7 +86,7 @@ You've built a working RAG system that:
 
 - **Setup Details**: Read `OLLAMA_RAG_SETUP.md`
 - **Architecture**: Read `ARCHITECTURE.md`
-- **Code**: Check `src/lib/ollama.ts` and `src/services/rag.service.ts`
+- **Code**: Check `src/lib/ai/models.ts` (the LangChain Ollama models) and `src/services/rag.service.ts`
 
 ---
 
@@ -128,7 +128,7 @@ ollama pull gemma3
 
 ```
 apps/api/
-├── src/lib/ollama.ts           ← NEW: Ollama integration
+├── src/lib/ai/models.ts        ← Ollama models (LangChain)
 ├── src/services/rag.service.ts ← UPDATED: RAG logic
 ├── src/routes/rag.ts           ← Ready to use
 ├── .env.example                ← UPDATED: Config

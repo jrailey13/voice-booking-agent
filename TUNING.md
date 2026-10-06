@@ -268,15 +268,15 @@ Quality: Excellent
 
 ### 1. Pre-warming Models
 
-Load models into memory once to avoid cold starts:
+Load models into memory once to avoid cold starts. Listing models does not load them; a request does:
 
 ```typescript
-// In index.ts, add startup check
-import { checkOllamaHealth } from './lib/ollama';
+// In index.ts, before listening
+import { createChatModel, createEmbeddings } from './lib/ai/models';
 
 const start = async () => {
-  await checkOllamaHealth();
-  // This ensures models are loaded
+  // One tiny request each loads the model into Ollama's memory.
+  await Promise.all([createChatModel().invoke('hi'), createEmbeddings().embedQuery('hi')]);
   // ...rest of startup
 };
 ```

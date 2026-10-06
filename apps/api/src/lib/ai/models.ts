@@ -1,8 +1,8 @@
 import { ChatOllama, OllamaEmbeddings } from '@langchain/ollama';
 
 /**
- * LangChain model factories for the local Ollama server. Same env vars and
- * defaults as lib/ollama.ts, which the voice/booking path still uses directly.
+ * LangChain model factories for the local Ollama server. Every model call in
+ * the API (replies, extraction, the booking agent, RAG) goes through these.
  * Construction does no I/O; the first request does.
  *
  * maxRetries is 0: LangChain otherwise retries up to 6 times with exponential
