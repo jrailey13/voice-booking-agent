@@ -43,6 +43,7 @@ file ─► extractText ─► RecursiveCharacterTextSplitter ─► OllamaEmbed
 - **Retriever.** `asRetriever({ k, filter })` turns the store into a Runnable that maps a question to documents. It is created per request, so the filter can be that request's `fileIds`.
 - **Prompt.** `ChatPromptTemplate` builds a system message (the "answer only from the context" instructions) and a human message (`Context: … Question: … Answer:`). Template variables are substituted, never parsed, so braces in documents are safe.
 - **Branching.** `RunnableBranch` skips the model entirely when nothing is retrieved.
+- **Config propagation.** A `RunnableLambda` that invokes another runnable must pass on the `config` it receives. Otherwise callbacks, tags and abort signals stop at the lambda. The chain does this for the retriever and the answer step, and a test pins it.
 
 ## Configuration
 
@@ -51,6 +52,15 @@ file ─► extractText ─► RecursiveCharacterTextSplitter ─► OllamaEmbed
 | `OLLAMA_BASE_URL` | `http://localhost:11434` |
 | `EMBEDDING_MODEL` | `nomic-embed-text` |
 | `LLM_MODEL` | `gemma3` |
+
+`DEBUG=true` prints each step of a query to the console through a LangChain callback handler (`lib/ai/stepTracer.ts`). It is the local alternative to LangSmith:
+
+```
+· retriever "What is this test document about?"
+· retriever 1.8s → 1 docs (ragtest.txt)
+· model     started (2 messages)
+· model     24.6s → answer (56 chars)
+```
 
 The LangChain models are created with `maxRetries: 0`. LangChain's default is up to 6 retries with exponential backoff, which would make an Ollama outage hang a request for minutes instead of failing fast.
 

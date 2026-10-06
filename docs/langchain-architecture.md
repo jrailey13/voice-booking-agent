@@ -465,7 +465,7 @@ Environment: Windows 11, CPU only, Node 25.1, Ollama 0.34.4. The spike scripts a
 3. **`OLLAMA_MODEL` is no longer read by the agent.** Older `.env` files set it to `gemma3`, which would have been silently ignored or would have failed. The agent reads only `AGENT_MODEL`.
 4. **Config is pure.** `loadConfig(env, cwd)` has no import-time side effects. dotenv and model construction moved to the entry point and bootstrap.
 5. **Removed as dead code:** `executor/agentExecutor.ts` (the regex loop), `tools/writeFile.ts` (unused), `types.ts`.
-6. **Not implemented:** the `DEBUG=true` console callback handler (§7). `DEBUG` prints stack traces only. It is a small follow-up if step-by-step tracing is wanted for learning.
+6. **`DEBUG=true` step tracing (§7): added after Phase 2.** `StepTracer` (`agent/runtime/stepTracer.ts`, `apps/api/src/lib/ai/stepTracer.ts`) is a callback handler that prints one line per model, tool or retriever step. Building it exposed a Phase 2 defect: the RAG chain's lambdas did not pass `config` to the runnables they invoked, so invoke-time callbacks never reached the retriever or the model. Fixed and pinned by a test in `chain.test.ts`.
 7. **Supply chain (§6 gap closed):** `agent/package-lock.json` is now tracked and `agent/.npmrc` (`legacy-peer-deps`) is removed.
 
 ---

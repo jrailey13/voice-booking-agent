@@ -53,6 +53,21 @@ Prompts are suggestions. The real limits are in code:
 - `read_file` always reports truncation. Silent truncation once led the model to answer confidently from the half of the file it never saw.
 - `runtime/guards.ts` refuses to start if LangSmith tracing variables are set, because `langchain` depends on `langsmith`.
 
-## 6. Testing without a model
+## 6. Callbacks show each step
+
+Every LangChain run (model call, tool call, retriever) reports start, end and error events to **callback handlers**. `runtime/stepTracer.ts` is a small handler that prints one line per step. With `DEBUG=true`, `index.ts` passes it to `converse`, which puts it in the invoke config. Callbacks given at invoke time reach every nested run, so one handler sees the whole turn:
+
+```
+· model     started (2 messages)
+· model     88.0s → tool calls: read_file
+· tool      read_file {"filePath":"apps/api/package.json"}
+· tool      read_file 0.0s → 1134 chars
+· model     started (4 messages)
+· model     44.5s → answer (61 chars)
+```
+
+This is the local alternative to LangSmith tracing, which the agent refuses (§5). LangChain also ships a `ConsoleCallbackHandler`, but it prints every run as JSON, which is too much to read.
+
+## 7. Testing without a model
 
 `FakeToolCallingModel` (from `langchain`) is scripted with the tool calls to emit on each model call, and it echoes the conversation as its text. `executor/agent.test.ts` uses it to check tool dispatch, memory, approval and rejection, and both call limits, all offline in milliseconds. Live behaviour was checked separately against `qwen2.5:7b-instruct` (see §12 of the architecture doc).
