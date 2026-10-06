@@ -12,6 +12,7 @@ import { generateBookingResponse, fallbackResponse } from '../llm';
 import { recentMessages } from '../conversationHistory';
 import { FakeBookingDb } from '../../test/fakes';
 import { ScriptedModel, toolCall } from '../../test/scriptedModel';
+import { hangingFetch, settlesWithin } from '../../test/hangingFetch';
 
 const legacy = vi.mocked(generateBookingResponse);
 const history = vi.mocked(recentMessages);
@@ -59,6 +60,25 @@ describe('respondToCaller', () => {
       deps: { model: new ScriptedModel(['hang']), db: db as never },
     });
     expect(result).toEqual({ reply: fallbackResponse('I want to book'), booking: null });
+  });
+
+  it('times out on the real Ollama model when the server never answers, and cancels the request', async () => {
+    const server = hangingFetch();
+    vi.stubGlobal('fetch', server.fetch);
+    try {
+      const outcome = await settlesWithin(
+        respondToCaller('I want to book', 'conv-1', {
+          env: { BOOKING_AGENT: 'true', BOOKING_AGENT_TIMEOUT_MS: '20' },
+          deps: { db: db as never },
+        }),
+        1000,
+      );
+      expect(outcome).toEqual({ status: 'fulfilled', value: { reply: fallbackResponse('I want to book'), booking: null } });
+      expect(server.aborted).toBe(server.requests);
+      expect(server.requests).toBe(1);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });
 

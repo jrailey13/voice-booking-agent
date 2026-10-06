@@ -1,4 +1,3 @@
-import type { ChatOllama } from '@langchain/ollama';
 import { prisma } from '../database';
 import { generateBookingResponse } from '../llm';
 import { recentMessages } from '../conversationHistory';
@@ -29,9 +28,6 @@ function timeoutMs(env: NodeJS.ProcessEnv): number {
   return value;
 }
 
-// One model client per process; construction does no I/O.
-let agentModel: ChatOllama | undefined;
-
 /**
  * Reply to the caller. With BOOKING_AGENT=true the booking agent answers and
  * may book during the turn (docs/booking-agent-design.md). Otherwise the
@@ -47,8 +43,11 @@ export async function respondToCaller(
     return { reply: await generateBookingResponse(message, conversationId), booking: null };
   }
 
+  // A model per turn, bound to the turn's deadline so a timeout cancels the
+  // HTTP request too. Construction does no I/O.
+  const signal = AbortSignal.timeout(timeoutMs(env));
   const deps: BookingTurnDeps = {
-    model: options.deps?.model ?? (agentModel ??= createBookingAgentModel(env)),
+    model: options.deps?.model ?? createBookingAgentModel(env, { signal }),
     db: options.deps?.db ?? prisma,
     callbacks: options.deps?.callbacks ?? debugCallbacks(env),
   };
@@ -56,7 +55,7 @@ export async function respondToCaller(
     message,
     conversationId,
     history: await recentMessages(conversationId),
-    signal: AbortSignal.timeout(timeoutMs(env)),
+    signal,
   });
 }
 

@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { hangingFetch, settlesWithin } from '../../test/hangingFetch';
 import { createChatModel, createEmbeddings, createBookingAgentModel } from './models';
 
 describe('model factory', () => {
@@ -29,5 +30,27 @@ describe('model factory', () => {
     expect(createBookingAgentModel({ LLM_MODEL: 'gemma3' })).toMatchObject({ model: 'qwen2.5:7b-instruct', baseUrl: 'http://localhost:11434' });
     expect(createBookingAgentModel({ BOOKING_AGENT_MODEL: 'llama3.1', OLLAMA_BASE_URL: 'http://gpu:11434' }))
       .toMatchObject({ model: 'llama3.1', baseUrl: 'http://gpu:11434' });
+  });
+
+  it('cancels the HTTP request when the call signal aborts, even before Ollama answers', async () => {
+    // ChatOllama only checks the signal between streamed chunks, so on its own a
+    // request that never produces a first token cannot be cancelled.
+    const server = hangingFetch();
+    for (const model of [
+      createChatModel({}, { signal: AbortSignal.timeout(20), fetch: server.fetch }),
+      createBookingAgentModel({}, { signal: AbortSignal.timeout(20), fetch: server.fetch }),
+    ]) {
+      const outcome = await settlesWithin(model.invoke('hi'), 1000);
+      expect(outcome).toMatchObject({ status: 'rejected' });
+    }
+    expect(server.requests).toBe(2);
+    expect(server.aborted).toBe(2);
+  });
+
+  it('leaves requests alone when no signal is given', async () => {
+    const server = hangingFetch();
+    const outcome = await settlesWithin(createChatModel({}, { fetch: server.fetch }).invoke('hi'), 50);
+    expect(outcome).toEqual({ status: 'pending' });
+    expect(server.aborted).toBe(0);
   });
 });

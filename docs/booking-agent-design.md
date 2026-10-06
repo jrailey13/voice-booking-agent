@@ -72,7 +72,8 @@ respondToCaller(message: string, conversationId: string): Promise<BookingTurnRes
 - *Consequences:* A false confirmation is impossible by construction. The cost is an occasional stilted reply when the model merely *mentions* booking ("would you like me to book that?"). That reply is harmless, and the tentative wording still moves the call forward. The cue regex is shared with the commit gate, so the two agree on what "confirmed" sounds like.
 
 **ADR-008: Real cancellation with `AbortSignal`, not `Promise.race`.**
-- *Decision:* The turn gets `AbortSignal.timeout(OLLAMA_TIMEOUT_MS)`, passed through the LangChain call options. The HTTP request to Ollama is actually cancelled, where the old race left it running in the background.
+- *Decision:* The turn gets `AbortSignal.timeout(BOOKING_AGENT_TIMEOUT_MS)`. The HTTP request to Ollama is actually cancelled, where the old race left it running in the background.
+- *Correction (2026-10-06):* passing the signal only as a LangChain call option was **not enough**. `ChatOllama` checks a call's signal only between streamed chunks, so a request still waiting for its first token was never cancelled. A turn against a slow or stuck Ollama ignored the deadline (reproduced: still pending 3s after a 200ms timeout). The unit tests missed it because the scripted model honours the signal itself. Fix: `respondToCaller` builds the model per turn with `createBookingAgentModel(env, { signal })`. That gives ChatOllama a `fetch` bound to the deadline (`abortableFetch` in `lib/ai/models.ts`), so the request itself is aborted. A test drives the real `ChatOllama` against a fetch that never answers.
 - *Consequences:* A timeout after a successful `book_appointment` still reports the booking (`state.booked`), so the UI shows it even though the spoken reply is the fallback. That fails safe: a missing confirmation, never a false one.
 
 **ADR-009: The agent model is separate from `LLM_MODEL`.**
