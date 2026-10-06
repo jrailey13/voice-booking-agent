@@ -1,5 +1,5 @@
 import { ollama } from './ollama';
-import { prisma } from './database';
+import { recentMessages } from './conversationHistory';
 
 /**
  * Booking-specific LLM chat function
@@ -10,12 +10,8 @@ export async function generateBookingResponse(
   conversationId: string
 ): Promise<string> {
   try {
-    // Get conversation history
-    const messages = await prisma.conversationMessage.findMany({
-      where: { conversationId },
-      orderBy: { createdAt: 'asc' },
-      take: 10, // Last 10 messages for context
-    });
+    // Get conversation history (the latest messages, oldest first)
+    const messages = await recentMessages(conversationId);
 
     // Build conversation context
     let conversationContext = '';
@@ -24,8 +20,13 @@ export async function generateBookingResponse(
       conversationContext += `${role}: ${msg.content}\n`;
     }
 
-    // Add current user message
-    conversationContext += `User: ${message}\nAssistant:`;
+    // Add the current user message, unless the caller already stored it as the
+    // latest turn (both services save it before asking for a reply).
+    const latest = messages[messages.length - 1];
+    if (!(latest && latest.role === 'user' && latest.content === message)) {
+      conversationContext += `User: ${message}\n`;
+    }
+    conversationContext += 'Assistant:';
 
     const systemPrompt = `You are a helpful booking assistant for a service provider. Your role is to:
 1. Help customers book appointments

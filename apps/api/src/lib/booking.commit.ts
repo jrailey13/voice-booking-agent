@@ -1,5 +1,6 @@
 import { prisma } from './database';
 import { extractBooking } from './booking.extractor';
+import { recentMessages } from './conversationHistory';
 
 /**
  * An appointment that was just written to the database as a result of the
@@ -13,10 +14,6 @@ export interface CommittedBooking {
   customerName: string | null;
   customerContact: string | null;
 }
-
-// How many recent turns to feed the extractor. Matches the context window used
-// for generation in generateBookingResponse.
-const CONTEXT_TURNS = 10;
 
 // Extraction is a second full LLM call, so we only pay for it once the assistant
 // signals the conversation has actually closed on a booking. This is a cheap
@@ -95,11 +92,9 @@ export async function maybeCommitBooking(
     });
     if (!conversation) return null;
 
-    const messages = await prisma.conversationMessage.findMany({
-      where: { conversationId },
-      orderBy: { createdAt: 'asc' },
-      take: CONTEXT_TURNS,
-    });
+    // The same recent window the reply model saw, so the confirmation cue is
+    // checked against the latest assistant turn.
+    const messages = await recentMessages(conversationId);
 
     // Already booked: the only work left is capturing or correcting customer
     // details. This is not gated by the confirmation cue — a correction ("fix

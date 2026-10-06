@@ -3,10 +3,10 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 // The commit path composes the extractor with the database. Both are mocked so
 // this test exercises only the commit/guard logic (dedupe, availability, wiring).
 vi.mock('./booking.extractor', () => ({ extractBooking: vi.fn() }));
+vi.mock('./conversationHistory', () => ({ recentMessages: vi.fn() }));
 vi.mock('./database', () => ({
   prisma: {
     conversation: { findUnique: vi.fn(), update: vi.fn() },
-    conversationMessage: { findMany: vi.fn() },
     appointment: {
       findFirst: vi.fn(),
       findUnique: vi.fn(),
@@ -18,12 +18,14 @@ vi.mock('./database', () => ({
 
 import { maybeCommitBooking } from './booking.commit';
 import { extractBooking } from './booking.extractor';
+import { recentMessages } from './conversationHistory';
 import { prisma } from './database';
 
 const mockExtract = extractBooking as unknown as ReturnType<typeof vi.fn>;
 const mockConvFind = prisma.conversation.findUnique as unknown as ReturnType<typeof vi.fn>;
 const mockConvUpdate = prisma.conversation.update as unknown as ReturnType<typeof vi.fn>;
-const mockMsgFind = prisma.conversationMessage.findMany as unknown as ReturnType<typeof vi.fn>;
+// Messages come from recentMessages (newest window, oldest-first), tested in conversationHistory.test.ts.
+const mockMsgFind = recentMessages as unknown as ReturnType<typeof vi.fn>;
 const mockApptFind = prisma.appointment.findFirst as unknown as ReturnType<typeof vi.fn>;
 const mockApptGet = prisma.appointment.findUnique as unknown as ReturnType<typeof vi.fn>;
 const mockApptCreate = prisma.appointment.create as unknown as ReturnType<typeof vi.fn>;
@@ -70,6 +72,14 @@ describe('maybeCommitBooking', () => {
       data: { appointmentId: 'appt-1' },
     });
     expect(result).toMatchObject({ id: 'appt-1', date: '2026-10-03', time: '02:00 PM' });
+  });
+
+  it('reads the recent-message window, so late confirmations are seen', async () => {
+    mockExtract.mockResolvedValue(READY);
+
+    await maybeCommitBooking('conv-1');
+
+    expect(mockMsgFind).toHaveBeenCalledWith('conv-1');
   });
 
   it('returns null and does not create when nothing is extractable', async () => {

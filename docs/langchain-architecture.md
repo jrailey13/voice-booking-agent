@@ -16,7 +16,7 @@ The fit assessment left Q2–Q5 open. This design takes these positions so it ca
 |---|---|---|
 | Q2 (accept a latency regression?) | Not needed. Areas 1 and 2 are off the voice path. | C2 is untouched |
 | Q3 (LangGraph?) | **Yes, indirectly.** `createAgent` in `langchain@1.x` is built on LangGraph, so the checkpointer, interrupts and threads are all real LangGraph concepts. A hand-built `StateGraph` is an optional later exercise (§9). | Nothing is lost if the user later wants explicit graphs |
-| Q4 (fix the history bug first?) | Out of scope here. It is a separate one-line fix in `apps/api`. | Independent |
+| Q4 (fix the history bug first?) | Out of scope here. Fixed separately in `apps/api` (`lib/conversationHistory.ts`). | Done |
 | Q5 (zod 4 compatibility) | **Resolved:** `langchain@1.5.15` depends on `zod ^3.25.76 \|\| ^4`, and `@langchain/langgraph` has a peer dependency of `zod ^4.2.0` | Verified from the npm registry, 2026-10-05 |
 
 ---

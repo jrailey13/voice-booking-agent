@@ -71,6 +71,36 @@ describe("generateBookingResponse", () => {
     expect(reply).toBe("Confirmed for 3 PM.");
   });
 
+  it("builds the prompt from the latest stored messages, oldest first", async () => {
+    process.env.OLLAMA_TIMEOUT_MS = "500";
+    mockGenerate.mockResolvedValue({ response: "ok" });
+    // A desc query: the database answers newest-first.
+    mockFindMany.mockResolvedValue([
+      { role: "user", content: "turn 12" },
+      { role: "assistant", content: "turn 11" },
+    ]);
+
+    await generateBookingResponse("turn 12", "conv-5");
+
+    expect(mockFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({ orderBy: { createdAt: "desc" } })
+    );
+    expect(mockGenerate.mock.calls[0][0].prompt).toBe(
+      "Assistant: turn 11\nUser: turn 12\nAssistant:"
+    );
+  });
+
+  it("does not repeat the caller's message when it is already stored", async () => {
+    process.env.OLLAMA_TIMEOUT_MS = "500";
+    mockGenerate.mockResolvedValue({ response: "ok" });
+    mockFindMany.mockResolvedValue([{ role: "user", content: "2pm please" }]);
+
+    await generateBookingResponse("2pm please", "conv-6");
+
+    const prompt: string = mockGenerate.mock.calls[0][0].prompt;
+    expect(prompt.match(/2pm please/g)).toHaveLength(1);
+  });
+
   it("selects the fallback branch by keyword when the model is unavailable", async () => {
     process.env.OLLAMA_TIMEOUT_MS = "10";
     mockGenerate.mockReturnValue(new Promise(() => {}));
