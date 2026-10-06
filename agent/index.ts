@@ -1,123 +1,103 @@
-import { runAgent, startAgentConversation } from "./executor/agentExecutor"
-import { config } from "./config"
+import dotenv from "dotenv"
+import { randomUUID } from "crypto"
+import { loadConfig, type Config } from "./config"
+import { startAgent } from "./runtime/bootstrap"
+import { createConsoleIO, type ConsoleIO } from "./runtime/io"
+import { converse, type Agent } from "./executor/agent"
+
+dotenv.config({ quiet: true })
 
 /**
- * Main entry point for the AI agent
- * The agent operates in agentic mode with autonomous tool use and decision-making
+ * Main entry point for the AI agent CLI.
  */
 async function run(): Promise<void> {
-  try {
-    // Determine mode from command line arguments
-    const mode = process.argv[2]
-    const argument = process.argv[3]
+  const mode = process.argv[2]
+  const argument = process.argv[3]
 
-    console.log("\n" + "=".repeat(60))
-    console.log("🤖 Agentic AI Assistant")
-    console.log("=".repeat(60) + "\n")
-
-    console.log("📋 Configuration:")
-    console.log(`   - Ollama Model: ${config.ollamaModel}`)
-    console.log(`   - Temperature: ${config.ollamaTemperature}`)
-    console.log(`   - Base URL: ${config.ollamaBaseUrl}\n`)
-
-    // Interactive agentic mode
-    if (mode === "--agent" || mode === "-a" || !mode) {
-      console.log("🤖 Interactive Agent Mode")
-      console.log(`   - Multi-turn conversation with autonomous tool use`)
-      console.log(`   - Type 'quit' to exit\n`)
-      await startAgentConversation()
-      return
-    }
-
-    // Single-turn agent request
-    if (mode === "--ask") {
-      const question = argument || "Analyze this codebase and suggest improvements"
-      console.log("💭 Single Question Mode")
-      console.log(`   Question: "${question}"\n`)
-      const response = await runAgent(question)
-      console.log("\n" + "=".repeat(60))
-      console.log("Response:")
-      console.log("=".repeat(60))
-      console.log(response)
-      console.log("=".repeat(60) + "\n")
-      return
-    }
-
-    // Unknown mode
+  if (mode === "--help" || mode === "-h") {
+    printUsage()
+    return
+  }
+  if (mode && !["--agent", "-a", "--ask"].includes(mode)) {
     console.error(`\n❌ Unknown mode: ${mode}\n`)
     printUsage()
-    process.exit(1)
-  } catch (error) {
-    console.error("\n" + "=".repeat(60))
-    console.error("❌ Error occurred during execution")
-    console.error("=".repeat(60))
+    process.exitCode = 1
+    return
+  }
 
-    if (error instanceof Error) {
-      console.error(`\nError: ${error.message}`)
+  const io = createConsoleIO()
+  try {
+    const config = loadConfig()
+    printBanner(config)
+    const agent = await startAgent(config, io)
 
-      // Print stack trace in verbose mode
-      if (process.env.DEBUG === "true") {
-        console.error("\nStack trace:")
-        console.error(error.stack)
-      }
+    if (mode === "--ask") {
+      const question = argument || "Analyze this codebase and suggest improvements"
+      const answer = await converse(agent, randomUUID(), question, io)
+      io.print(`\n🤖 ${answer}\n`)
     } else {
-      console.error(`\nUnexpected error: ${String(error)}`)
+      await interactive(agent, io)
     }
-
-    console.error("\n💡 Tips:")
-    console.error("   - Ensure Ollama is running: ollama serve")
-    console.error("   - Check model exists: ollama pull llama3.1")
-    console.error("   - Check .env file configuration")
-    console.error("   - Run with DEBUG=true for full stack trace")
-    console.error("   - Run with --help to see usage\n")
-
-    process.exit(1)
+  } catch (error) {
+    reportError(error)
+    process.exitCode = 1
+  } finally {
+    io.close()
   }
 }
 
-/**
- * Print usage information
- */
+/** One thread for the whole session, so the agent remembers earlier turns. */
+async function interactive(agent: Agent, io: ConsoleIO): Promise<void> {
+  const threadId = randomUUID()
+  io.print("🤖 Agent ready. Type your request, or 'quit' to exit.\n")
+  for (;;) {
+    const input = (await io.prompt("You: ")).trim()
+    if (input.toLowerCase() === "quit") break
+    if (!input) continue
+    try {
+      io.print(`\n🤖 ${await converse(agent, threadId, input, io)}\n`)
+    } catch (error) {
+      // A failed turn (e.g. Ollama went away) shouldn't end the session.
+      reportError(error)
+    }
+  }
+  io.print("Goodbye!")
+}
+
+function printBanner(config: Config): void {
+  console.log(`\n${"=".repeat(60)}\n🤖 Agentic AI Assistant\n${"=".repeat(60)}`)
+  console.log(`   Model:  ${config.model} (temperature ${config.temperature})`)
+  console.log(`   Ollama: ${config.ollamaBaseUrl}`)
+  console.log(`   Root:   ${config.root}  (tools cannot read or write outside it)`)
+  console.log(`   Limits: ${config.maxModelCalls} model calls, ${config.maxToolCalls} tool calls per request\n`)
+}
+
+function reportError(error: unknown): void {
+  const message = error instanceof Error ? error.message : String(error)
+  console.error(`\n❌ ${message}`)
+  if (process.env.DEBUG === "true" && error instanceof Error) console.error(error.stack)
+}
+
 function printUsage(): void {
   console.log(`
-Usage: npm run dev [MODE] [ARGUMENT]
+Usage: npm run dev -- [MODE] [ARGUMENT]
 
-Modes (optional - interactive mode is default):
-  --agent, -a              Interactive agentic mode (default)
-                           Multi-turn conversation with tool use
-                           Example: npm run dev --agent
+Modes:
+  --agent, -a          Interactive session (default). The agent remembers the conversation.
+  --ask "QUESTION"     Answer a single question and exit.
+  --help, -h           Show this help.
 
-  --ask [QUESTION]         Single question to the agent
-                           Example: npm run dev --ask "What's the architecture?"
+Environment variables:
+  AGENT_MODEL            Tool-capable Ollama model (default: qwen2.5:7b-instruct)
+  OLLAMA_TEMPERATURE     0-2 (default: 0.2)
+  OLLAMA_BASE_URL        Ollama server (default: http://localhost:11434)
+  AGENT_ROOT             Directory the tools are confined to (default: current directory)
+  AGENT_MAX_MODEL_CALLS  Model calls allowed per request (default: 12)
+  AGENT_MAX_TOOL_CALLS   Tool calls allowed per request (default: 20)
+  DEBUG                  "true" prints stack traces
 
-  --help, -h               Show this help message
-
-Examples:
-  npm run dev                                     # Default interactive mode
-  npm run dev --agent                             # Explicit interactive mode
-  npm run dev --ask "Analyze this codebase"       # Single question
-  DEBUG=true npm run dev:debug --agent            # Verbose output
-
-Environment Variables:
-  OLLAMA_MODEL             Model to use (default: gemma3)
-  OLLAMA_TEMPERATURE       Temperature 0-1 (default: 0.2)
-  OLLAMA_BASE_URL          Ollama server URL (default: http://localhost:11434)
-  DEBUG                    Set to "true" for detailed output
-
-Features:
-  ✨ Autonomous tool use     - Agent decides which tools to use
-  🧠 Multi-turn conversations - Remember context between messages
-  📁 File operations         - Read, write, search files
-  🔍 Code analysis          - Analyze project structure
-  💡 Intelligent reasoning   - Think-act-observe loop
+Writing a file always asks for your approval first.
 `)
 }
 
-// Show help if requested
-if (process.argv[2] === "--help" || process.argv[2] === "-h") {
-  printUsage()
-  process.exit(0)
-}
-
-// Run the agent
 run()

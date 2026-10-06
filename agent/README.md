@@ -1,268 +1,89 @@
-# AI Agent - Agentic Assistant
+# Agent CLI
 
-A fully autonomous AI agent powered by LangChain and Ollama with intelligent tool use, decision-making, and multi-turn conversations.
+A terminal assistant for exploring a codebase, built on LangChain v1's `createAgent` and a local Ollama model. It reads files, searches and summarises the project, asks you clarifying questions, and can write files after you approve each write. Everything runs on the machine.
 
-## 🎯 Features
+How it works, in LangChain terms, is in [AGENTIC.md](./AGENTIC.md). The design and its decisions are in [`docs/langchain-architecture.md`](../docs/langchain-architecture.md).
 
-**🤖 Autonomous Tool Use**  
-- Agent decides when and how to use tools
-- No predetermined pipeline - truly agentic behavior
+## Requirements
 
-**🧠 Think-Act-Observe Loop**  
-- Agent reasons about tasks step-by-step
-- Uses tools to gather information or take action
-- Observes results and adapts strategy
-
-**🛠️ Comprehensive Tools**  
-- File reading and writing
-- Project structure analysis
-- Code file searching and examination
-- Codebase comprehensive analysis
-
-**💬 Multi-turn Conversations**  
-- Interactive CLI chat with agent
-- Maintains context between messages
-- Single-question mode also supported
-
-**🔧 Configurable**  
-- Environment variables for LLM selection, temperature
-- Fully local (no API keys needed)
-
-**🚀 Local-first**  
-- Uses Ollama for 100% local execution
-- Works offline after model download
-- No external API dependencies
-
-## 📋 Prerequisites
-
-- **Node.js** 20+ (check with `node --version`)
-- **Ollama** running locally (download from [ollama.ai](https://ollama.ai))
-- **A local LLM model** (e.g., `ollama pull gemma:latest`)
-
-## 🚀 Installation
+- Node 20+
+- [Ollama](https://ollama.com) running locally, with a model that supports **tool calling**:
 
 ```bash
-# Navigate to agent directory
+ollama pull qwen2.5:7b-instruct
+```
+
+`gemma3`, the model the voice agent uses, cannot call tools. The agent checks this at startup and refuses to run with a model that can't call tools.
+
+## Usage
+
+```bash
 cd agent
-
-# Install dependencies
 npm install
+cp .env.example .env            # optional; the defaults work
 
-# Copy environment template (optional, defaults are already set)
-cp .env.example .env
+npm run dev                     # interactive session
+npm run dev -- --ask "Which web framework does apps/api use?"
+npm run dev -- --help
 ```
 
-## ⚙️ Configuration
+Note the `--` before the flags. Without it, npm consumes them itself.
 
-Edit `.env` to customize:
+The tools are confined to the **directory you start from**, or to `AGENT_ROOT`. To explore the whole repo from `agent/`, run `AGENT_ROOT=.. npm run dev`.
 
-```env
-# Ollama Configuration
-OLLAMA_MODEL=gemma3                 # Model to use
-OLLAMA_TEMPERATURE=0.2              # Creativity (0.0-1.0)
-OLLAMA_BASE_URL=http://localhost:11434  # Ollama server URL
+An interactive session remembers the conversation until you type `quit`. Each `--ask` starts a fresh conversation.
 
-# Debug
-DEBUG=false                         # Set to 'true' for detailed output
-```
+## Tools
 
-Available models: `gemma3`, `neural-chat`, `mistral`, `llama2`, etc.
+| Tool | What it does |
+|---|---|
+| `read_file` | Reads a file in pages of 5,000 characters (`offset`/`limit`). It always says when there is more. |
+| `list_files` | Lists a directory. Directories end with `/`. |
+| `search_files` | Finds files by name, skipping `node_modules`, `.git` and build output |
+| `get_project_structure` | Shows the directory tree |
+| `analyze_codebase` | File count, languages, file list and sample contents |
+| `ask_user` | Asks you a question and waits for your answer |
+| `write_file` | Writes a file, **only after you approve it** at a `y/N` prompt |
 
-## 💻 Quick Start
+Every path is resolved inside the root. `../`, absolute paths elsewhere, and links that point outside the root are all refused.
 
-### Interactive Agent (Recommended!)
+## Configuration
+
+| Variable | Default | |
+|---|---|---|
+| `AGENT_MODEL` | `qwen2.5:7b-instruct` | Must support tool calling |
+| `OLLAMA_TEMPERATURE` | `0.2` | 0–2 |
+| `OLLAMA_BASE_URL` | `http://localhost:11434` | |
+| `AGENT_ROOT` | current directory | The sandbox for every tool |
+| `AGENT_MAX_MODEL_CALLS` | `12` | Per request. The run ends with a notice when it is reached. |
+| `AGENT_MAX_TOOL_CALLS` | `20` | Per request |
+| `DEBUG` | `false` | `true` prints stack traces |
+
+The agent **refuses to start** if `LANGSMITH_TRACING`, `LANGCHAIN_TRACING_V2`, `LANGCHAIN_TRACING`, `LANGSMITH_API_KEY` or `LANGCHAIN_API_KEY` is set. Any of them would send your code to LangSmith.
+
+## Speed
+
+On a CPU-only machine, expect about 5–7s for the model to choose a tool. Answering with file contents in context takes 30–70s, longer when it has read large files. The first request also loads the model. A GPU, or a smaller tool-capable model, helps most.
+
+## Development
 
 ```bash
-npm run dev
-
-# or
-npm run dev --agent
+npm test          # vitest, fully offline (uses LangChain's fake models)
+npx tsc --noEmit  # typecheck
 ```
-
-### Single Question
-
-```bash
-npm run dev --ask "Analyze this codebase"
-```
-
-### Debug Mode
-
-```bash
-npm run dev:debug --agent
-```
-
-## 📁 Project Structure
 
 ```
 agent/
-├── executor/
-│   └── agentExecutor.ts      # Main agent loop and execution
-├── tools/
-│   ├── agentTools.ts          # Tool definitions
-│   └── codebaseReader.ts      # Codebase analysis utility
-├── config.ts                  # LLM configuration
-├── index.ts                   # CLI entry point
-├── types.ts                   # TypeScript interfaces
-├── .env                       # Environment variables
-└── package.json               # Dependencies
+├── index.ts                 CLI: modes, banner, interactive loop
+├── config.ts                env → Config (pure)
+├── executor/agent.ts        buildAgent (createAgent + middleware) and converse (one turn + approvals)
+├── runtime/
+│   ├── bootstrap.ts         startup checks, then wires model + tools + checkpointer
+│   ├── guards.ts            refuses remote tracing
+│   ├── capability.ts        refuses models without tool support
+│   └── io.ts                the terminal seam (prompt/print)
+└── tools/
+    ├── agentTools.ts        the seven tools, bound to a root and an IO
+    ├── sandbox.ts           resolveInsideRoot: path confinement
+    └── codebaseReader.ts    used by analyze_codebase
 ```
-
-## 🛠️ Available Tools
-
-The agent autonomously uses these tools:
-
-| Tool | Purpose |
-|------|---------|
-| `read_file` | Read and examine specific files |
-| `list_files` | List files in a directory |
-| `search_files` | Search for files matching patterns |
-| `get_project_structure` | Get directory tree structure |
-| `analyze_codebase` | Comprehensive codebase analysis |
-| `write_file` | Write content to files |
-| `ask_user` | Ask clarification questions |
-
-## 🎯 How It Works
-
-### Agentic Loop
-
-1. **THINK**: Agent analyzes your request and formulates strategy
-2. **ACT**: Agent uses tools to gather information or take actions
-3. **OBSERVE**: Agent examines results and decides next steps
-4. **REPEAT**: Process continues until task is complete
-
-### Example Flow
-
-```
-User: "Generate a README for this project"
-        ↓
-Agent THINKS: "I need to understand the project"
-        ↓
-Agent ACTS: Uses get_project_structure and read_file tools
-        ↓
-Agent OBSERVES: Has project structure and key files
-        ↓
-Agent THINKS: "Now I can write a comprehensive README"
-        ↓
-Agent ACTS: Uses write_file tool
-        ↓
-Agent RESPONDS: "I've created README.md"
-```
-
-## 💻 Development Scripts
-
-```bash
-# Development (interactive mode by default)
-npm run dev
-
-# Debug mode
-npm run dev:debug
-
-# Build TypeScript to JavaScript
-npm run build
-
-# Clean build output
-npm run clean
-
-# Run pre-built version
-npm start
-```
-
-## 📚 Documentation
-
-See [AGENTIC.md](./AGENTIC.md) for detailed information about advanced features and workflows.
-
-## 🔧 Troubleshooting
-
-### Agent not responding
-```bash
-# Check Ollama is running
-ollama serve
-
-# Check model is available
-ollama list
-
-# Run with debug mode
-npm run dev:debug
-```
-
-### Tool execution fails
-- Check file paths are correct
-- Ensure permissions for file operations
-- Review error messages in debug mode
-
-### Agent takes too long
-- Use a faster model: `OLLAMA_MODEL=neural-chat npm run dev`
-- Reduce temperature: `OLLAMA_TEMPERATURE=0.1`
-- Ask more specific questions
-
-## 🌟 Example Interactions
-
-### Codebase Analysis
-```
-You: What is the main architecture of this project?
-🤖 Agent: I'll analyze the project structure...
-   This appears to be a monorepo with...
-```
-
-### Code Generation
-```
-You: Create comprehensive API documentation
-🤖 Agent: I'll examine the codebase and generate documentation...
-   Created API_DOCS.md with full API reference
-```
-
-### Project Understanding
-```
-You: Explain what this project does
-🤖 Agent: Let me read the project structure...
-   This project is a full-stack AI application with...
-```
-
-## 🚀 Advanced Features
-
-### Custom Model Selection
-```bash
-OLLAMA_MODEL=mistral npm run dev
-OLLAMA_MODEL=neural-chat npm run dev
-```
-
-### Batch Processing
-```bash
-for dir in ~/projects/*/; do
-  npm run dev --ask "Analyze $dir" > "${dir%/}_analysis.txt"
-done
-```
-
-### Environment Variables
-```bash
-# Adjust creativity
-OLLAMA_TEMPERATURE=0.5 npm run dev
-
-# Use different server
-OLLAMA_BASE_URL=http://remote-server:11434 npm run dev
-
-# Enable debug logging
-DEBUG=true npm run dev
-```
-
-## 📝 Notes
-
-- All execution happens locally (no external APIs)
-- Agent reasoning and tool calls are displayed in real-time
-- Each conversation is independent (no persistence between sessions)
-- Responses are immediate (no streaming - waits for full response)
-
-## 🚀 Future Enhancements
-
-- Web search tool for external information
-- Git integration for version control
-- Database query tools
-- API calling capabilities
-- Custom tool plugins
-- Multi-agent collaboration
-- Session persistence
-- Streaming responses
-
-## 📜 License
-
-ISC
