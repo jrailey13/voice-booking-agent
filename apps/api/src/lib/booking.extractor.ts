@@ -1,5 +1,9 @@
 import { z } from 'zod';
-import { ollama } from './ollama';
+import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
+import type { Callbacks } from '@langchain/core/callbacks/manager';
+import { HumanMessage, SystemMessage } from '@langchain/core/messages';
+import { createChatModel } from './ai/models';
+import { debugCallbacks } from './ai/stepTracer';
 import { normalizeDate, normalizeTime } from './datetime';
 
 /**
@@ -15,9 +19,11 @@ export interface ExtractedBooking {
   customerContact: string | null;
 }
 
-// Shape we ask the model to emit. Keys are required (so a truncated extraction
-// is rejected) but values may be null while the conversation is still gathering
-// details. Times/dates arrive as free text and are normalized below.
+// Shape the model must emit. withStructuredOutput sends it to Ollama as a JSON
+// Schema, which constrains decoding, and validates the reply against it. Keys
+// are required (so a truncated extraction is rejected) but values may be null
+// while the conversation is still gathering details. Times/dates arrive as free
+// text and are normalized below.
 const RawBookingSchema = z.object({
   ready_to_book: z.boolean(),
   date: z.string().nullable(),
@@ -39,6 +45,12 @@ Return ONLY a JSON object with these keys:
 - customer_contact: a phone number or email, or null.
 Do not invent details the customer did not provide. If unsure, use null and ready_to_book=false.`;
 
+export interface ExtractDeps {
+  /** Must support JSON Schema output; any Ollama chat model does. Defaults to LLM_MODEL. */
+  model?: BaseChatModel;
+  callbacks?: Callbacks;
+}
+
 /**
  * Ask the model whether the conversation has produced a committable booking and,
  * if so, extract and normalize it. Returns null whenever the conversation is not
@@ -50,27 +62,34 @@ Do not invent details the customer did not provide. If unsure, use null and read
  */
 export async function extractBooking(
   transcript: string,
-  ref: Date = new Date()
+  ref: Date = new Date(),
+  deps: ExtractDeps = {}
 ): Promise<ExtractedBooking | null> {
-  let raw: unknown;
+  let data: z.infer<typeof RawBookingSchema>;
   try {
-    const response = await ollama.generate({
-      model: process.env.LLM_MODEL || 'gemma3',
-      system: SYSTEM_PROMPT,
-      prompt: `Conversation so far:\n${transcript}\n\nExtract the booking as JSON.`,
-      format: 'json',
-      stream: false,
+    // jsonSchema, not tool calling: gemma3 cannot call tools, and Ollama
+    // enforces a JSON Schema format on any model.
+    const model: BaseChatModel = deps.model ?? createChatModel();
+    const extractor = model.withStructuredOutput(RawBookingSchema, {
+      name: 'booking',
+      method: 'jsonSchema',
     });
-    raw = JSON.parse(response.response);
+    data = await extractor.invoke(
+      [
+        new SystemMessage(SYSTEM_PROMPT),
+        new HumanMessage(`Conversation so far:
+${transcript}
+
+Extract the booking as JSON.`),
+      ],
+      { callbacks: deps.callbacks ?? debugCallbacks() }
+    );
   } catch (error) {
-    console.warn('Booking extraction failed (model or JSON parse):', error);
+    // The model call failed, or its reply was not valid JSON matching the schema.
+    console.warn('Booking extraction failed:', error);
     return null;
   }
 
-  const parsed = RawBookingSchema.safeParse(raw);
-  if (!parsed.success) return null;
-
-  const data = parsed.data;
   if (!data.ready_to_book) return null;
   if (!data.date || !data.time) return null;
 

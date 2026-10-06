@@ -139,7 +139,7 @@ Ranked by **learning value ÷ product risk**. This says *where* LangChain could 
 |---|---|---|---|---|
 | 1 | **`agent/` CLI** — make it use LangChain properly | High: tool binding, tool messages, the agent loop, possibly LangGraph | **None.** Off the voice path, a dev tool | Needs a tool-capable model, e.g. `qwen2.5:7b-instruct`. Latency matters little here. |
 | 2 | **RAG service** | High: loaders, splitters, embeddings, vector stores, retrievers, LCEL chains | Low. Not on the voice path. Contract is preserved (FR3). | Mainly a learning and convention gain. Functional gain is small. |
-| 3 | **Booking extraction** (structured output) | Medium | Low–medium | Close to a no-op functionally. Only worth it as a stepping stone to #4. |
+| 3 | **Booking extraction** (structured output) | Medium | Low–medium | Close to a no-op functionally. Only worth it as a stepping stone to #4. **Done 2026-10-06:** `withStructuredOutput` with `method: "jsonSchema"`; same answers and latency as `format: 'json'` live (see architecture doc §9). |
 | 4 | **Booking conversation as a tool-using agent** | Highest | **High.** Voice path, C2 latency, needs model swap away from gemma3 | The only area with a real **user** benefit (fixes §2.4 #2). It conflicts directly with C2 on current hardware unless the tool round-trips stay within the latency budget. |
 
 ---
