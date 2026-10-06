@@ -5,17 +5,11 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 // were written against the hand-rolled implementation and must keep passing
 // after the LangChain rework (FR3 in docs/langchain-fit-assessment.md).
 
-const { ollama, db } = await vi.hoisted(async () => {
-  const { createFakeOllama, FakeRagDb } = await import('../test/fakes');
-  const ollama = createFakeOllama();
-  // Ollama clients capture fetch when constructed (at module load), so stub first.
-  globalThis.fetch = ollama.fetch;
-  return { ollama, db: new FakeRagDb() };
-});
-
-vi.mock('../lib/database', () => ({ prisma: db }));
-
+// Must be imported first: it stubs fetch before any Ollama client is constructed.
+import { ollama, db } from '../test/ragTestEnv';
 import { RagService } from './rag.service';
+
+vi.mock('../lib/database', async () => ({ prisma: (await import('../test/ragTestEnv')).db }));
 
 // Spelled out with explicit joins: the original prompt has a trailing space on
 // its first two lines, which editors tend to strip from a template literal.

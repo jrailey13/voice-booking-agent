@@ -58,7 +58,7 @@ export function createFakeOllama(): FakeOllama {
       state.embedCalls = 0
       state.failEmbeddings = false
     },
-    fetch: (async (input: RequestInfo | URL, init?: RequestInit) => {
+    fetch: (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
       const url = String(input instanceof Request ? input.url : input)
       const body = init?.body ? JSON.parse(String(init.body)) : {}
       const now = new Date().toISOString()
