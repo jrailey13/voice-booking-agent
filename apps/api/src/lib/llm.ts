@@ -1,34 +1,10 @@
-import { ollama } from './ollama';
+import type { Callbacks } from '@langchain/core/callbacks/manager';
+import { AIMessage, HumanMessage, SystemMessage, type BaseMessage } from '@langchain/core/messages';
+import { createChatModel } from './ai/models';
+import { debugCallbacks } from './ai/stepTracer';
 import { recentMessages } from './conversationHistory';
 
-/**
- * Booking-specific LLM chat function
- * Handles conversational AI for appointment booking
- */
-export async function generateBookingResponse(
-  message: string,
-  conversationId: string
-): Promise<string> {
-  try {
-    // Get conversation history (the latest messages, oldest first)
-    const messages = await recentMessages(conversationId);
-
-    // Build conversation context
-    let conversationContext = '';
-    for (const msg of messages) {
-      const role = msg.role === 'user' ? 'User' : 'Assistant';
-      conversationContext += `${role}: ${msg.content}\n`;
-    }
-
-    // Add the current user message, unless the caller already stored it as the
-    // latest turn (both services save it before asking for a reply).
-    const latest = messages[messages.length - 1];
-    if (!(latest && latest.role === 'user' && latest.content === message)) {
-      conversationContext += `User: ${message}\n`;
-    }
-    conversationContext += 'Assistant:';
-
-    const systemPrompt = `You are a helpful booking assistant for a service provider. Your role is to:
+const SYSTEM_PROMPT = `You are a helpful booking assistant for a service provider. Your role is to:
 1. Help customers book appointments
 2. Check availability and suggest times
 3. Confirm bookings with customers
@@ -47,43 +23,55 @@ Available times: 09:00 AM, 10:00 AM, 11:00 AM, 01:00 PM, 02:00 PM, 03:00 PM, 04:
 
 Always respond as if you're continuing a conversation with the customer.`;
 
-    try {
-      // Generate using Ollama, but fall back if it stalls past the timeout.
-      // ollama-js has no per-request abort signal, so race the call against a
-      // rejecting timer; a timeout rejects into the fallback branch below.
-      // Configurable so slower local hardware can actually reach the model.
-      // gemma3-4B on CPU can take ~15-20s per turn; a 10s cap silently forces
-      // every response into the scripted fallback below.
-      const TIMEOUT_MS = parseInt(process.env.OLLAMA_TIMEOUT_MS || '30000', 10);
-      let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
-      const timeout = new Promise<never>((_, reject) => {
-        timeoutHandle = setTimeout(
-          () => reject(new Error('Ollama generation timed out')),
-          TIMEOUT_MS
-        );
-      });
+export interface BookingResponseOptions {
+  env?: NodeJS.ProcessEnv;
+  /** The fetch the model sends requests with (tests use a fake Ollama). */
+  fetch?: typeof fetch;
+  callbacks?: Callbacks;
+}
 
-      try {
-        const response = await Promise.race([
-          ollama.generate({
-            model: process.env.LLM_MODEL || 'gemma3',
-            prompt: conversationContext,
-            system: systemPrompt,
-            stream: false,
-          }),
-          timeout,
-        ]);
-        return response.response.trim();
-      } finally {
-        clearTimeout(timeoutHandle);
-      }
-    } catch (ollamaError) {
-      console.warn('Ollama generation failed, using fallback response:', ollamaError);
-      return fallbackResponse(message);
+/**
+ * The default booking reply: the LLM_MODEL chat model over the conversation's
+ * latest messages. If Ollama fails or exceeds OLLAMA_TIMEOUT_MS, the request is
+ * cancelled and a scripted reply keeps the call moving (C3).
+ */
+export async function generateBookingResponse(
+  message: string,
+  conversationId: string,
+  options: BookingResponseOptions = {}
+): Promise<string> {
+  const env = options.env ?? process.env;
+  let messages: BaseMessage[];
+  try {
+    // Conversation history: the latest messages, oldest first.
+    const history = await recentMessages(conversationId);
+    messages = [
+      new SystemMessage(SYSTEM_PROMPT),
+      ...history.map((m) => (m.role === 'user' ? new HumanMessage(m.content) : new AIMessage(m.content))),
+    ];
+    // Add the current user message, unless the caller already stored it as the
+    // latest turn (both services save it before asking for a reply).
+    const latest = history[history.length - 1];
+    if (!(latest && latest.role === 'user' && latest.content === message)) {
+      messages.push(new HumanMessage(message));
     }
   } catch (error) {
     console.error('Error generating booking response:', error);
     throw new Error('Failed to generate booking response');
+  }
+
+  try {
+    // gemma3-4B on CPU can take ~15-20s per turn; a 10s cap silently forced
+    // every response into the scripted fallback, so the budget is configurable.
+    // The signal goes to the model's fetch, so a timeout cancels the request
+    // itself, even before Ollama's first token.
+    const signal = AbortSignal.timeout(parseInt(env.OLLAMA_TIMEOUT_MS || '30000', 10));
+    const model = createChatModel(env, { signal, fetch: options.fetch });
+    const response = await model.invoke(messages, { signal, callbacks: options.callbacks ?? debugCallbacks(env) });
+    return response.text.trim();
+  } catch (ollamaError) {
+    console.warn('Ollama generation failed, using fallback response:', ollamaError);
+    return fallbackResponse(message);
   }
 }
 
