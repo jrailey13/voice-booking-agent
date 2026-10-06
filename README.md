@@ -63,7 +63,7 @@ The usage/quota machinery began as a spend meter for the OpenAI Whisper API. Wit
 
 The voice agent is the primary system. Two supporting pieces share the codebase:
 
-- **Retrieval service** (`apps/api/src/services/rag.service.ts`) — uploads PDF and DOCX files, chunks them at 500 characters with 100 characters of overlap, embeds each chunk with `nomic-embed-text`, and answers questions by cosine similarity with source citations. All inference is local, so documents never leave the machine.
+- **Retrieval service** (`apps/api/src/services/rag.service.ts`) — uploads PDF and DOCX files and answers questions from them with source citations, built from LangChain parts: a recursive text splitter (500/100), `nomic-embed-text` embeddings, a custom `VectorStore` over the Postgres chunk table, and an LCEL retrieval chain. All inference is local, so documents never leave the machine. See [`OLLAMA_RAG_README.md`](OLLAMA_RAG_README.md).
 - **Agent CLI** (`agent/`) — a LangChain v1 `createAgent` assistant for exploring a codebase from the terminal. It uses structured tool calling on a local tool-capable model (`qwen2.5:7b-instruct`), keeps conversation memory through a LangGraph checkpointer, confines its tools to one directory, and asks for approval before each file write. Independent of the booking flow. See [`agent/AGENTIC.md`](agent/AGENTIC.md).
 
 ## Stack

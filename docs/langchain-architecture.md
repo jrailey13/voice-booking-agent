@@ -341,7 +341,7 @@ export async function ingestDocument(
 |---|---|---|
 | **0. Spike** (½ day) — ✅ **done**, §12 | `npm install` in `agent/` (it is not installed today). Add packages to the API. Typecheck a subpath import under node10 resolution. Confirm the `humanInTheLoopMiddleware` resume payload shape against the installed version. Run one `bindTools` call on qwen2.5 by hand (the Option A kata). | Typecheck is green in both packages. One real tool call has round-tripped. |
 | **1. Agent** — ✅ **done**, §13 | guards, capability, sandbox, tools, `createAgent`, `converse`, tests, docs | §4.7 tests are green. A manual session reads files, remembers context across turns, and asks before writing. |
-| **2. RAG** | models, store, ingest, chain, service rewiring, tests, docs | §5.7 tests are green. Existing API tests are green. A manual upload and query through the web UI returns the same response shape. |
+| **2. RAG** — ✅ **done**, §14 | models, store, ingest, chain, service rewiring, tests, docs | §5.7 tests are green. Existing API tests are green. A manual upload and query through the web UI returns the same response shape. |
 
 Each phase ships as its own reversible commit series (S2). Phase 2 does not depend on Phase 1.
 
@@ -467,3 +467,30 @@ Environment: Windows 11, CPU only, Node 25.1, Ollama 0.34.4. The spike scripts a
 5. **Removed as dead code:** `executor/agentExecutor.ts` (the regex loop), `tools/writeFile.ts` (unused), `types.ts`.
 6. **Not implemented:** the `DEBUG=true` console callback handler (§7). `DEBUG` prints stack traces only. It is a small follow-up if step-by-step tracing is wanted for learning.
 7. **Supply chain (§6 gap closed):** `agent/package-lock.json` is now tracked and `agent/.npmrc` (`legacy-peer-deps`) is removed.
+
+---
+
+## 14. Phase 2 results (2026-10-05)
+
+**Exit criteria met.**
+
+- **Offline:** the API suite runs 82 tests and they all pass (1 is skipped, the opt-in STT fixture test). `tsc --noEmit` is clean. That includes 12 **contract tests** for `RagService`. They were written and committed (`925b247`) *before* the rework, passed against the hand-rolled implementation, and pass unchanged against the LangChain one.
+- **Live, against Postgres and Ollama, through the real HTTP API:**
+
+| Check | Result |
+|---|---|
+| Upload a 1.25 KB text file | `ready` in 1.6s. 3 chunks, each starting and ending on a paragraph boundary, 768-d |
+| "What is the fee for a late cancellation?" | Correct ("a 40 dollar fee"), citing the right file. 22s, including the cold model load. |
+| Query a document stored with the **old** fixed-window chunks | Correct answer and snippet. 5.4s. **No re-index needed.** |
+| Delete | 204. The document and its chunks are gone (cascade). |
+
+These checks used `curl` against the same endpoints the web client calls (`apps/web/src/lib/api.ts`). The web UI itself was not clicked through. The test document and the 3 test query-log rows were removed afterwards. The database was left as it was found.
+
+### Differences from the design
+
+1. **`maxRetries: 0` on the LangChain models (new).** `ChatOllama` and `OllamaEmbeddings` retry up to 6 times with exponential backoff by default. The hand-rolled client failed immediately, so an Ollama outage would have hung uploads for minutes. A contract test caught this as a timeout. It is now pinned by a unit test.
+2. **The chain retrieves through `store.asRetriever` with a per-request filter.** The chain test therefore runs against a real `PrismaVectorStore` over the in-memory fake DB, not a hand-made stub.
+3. **`RagInput`/`RagOutput` are type aliases, not interfaces.** `RunnablePassthrough.assign` needs `Record<string, unknown>`-compatible types, and interfaces have no index signature.
+4. **Prompt line endings.** The original system prompt was a template literal in a CRLF-checked-out file, so on Windows it was actually sent with `\r\n`. The moved prompt is built with explicit `\n` joins, keeping its original trailing spaces. The contract test normalises line endings.
+5. **`lib/ollama.ts`** lost `generateEmbedding`, `generateAnswer` and `cosineSimilarity`. The voice and booking path's `ollama` client and `checkOllamaHealth` are untouched (non-goal).
+6. **Not done:** the optional `scripts/reindex-rag.ts`. The live check showed old chunks work as they are.
