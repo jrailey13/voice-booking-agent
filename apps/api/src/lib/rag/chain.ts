@@ -2,7 +2,7 @@ import type { BaseChatModel } from '@langchain/core/language_models/chat_models'
 import type { Document } from '@langchain/core/documents';
 import { ChatPromptTemplate } from '@langchain/core/prompts';
 import { StringOutputParser } from '@langchain/core/output_parsers';
-import { RunnableBranch, RunnableLambda, RunnablePassthrough, RunnableSequence, type Runnable } from '@langchain/core/runnables';
+import { RunnableBranch, RunnableLambda, RunnablePassthrough, RunnableSequence, type Runnable, type RunnableConfig } from '@langchain/core/runnables';
 import type { ChunkMetadata, PrismaVectorStore } from './prismaVectorStore';
 
 // Moved verbatim from the hand-rolled service, trailing spaces included, so
@@ -49,12 +49,14 @@ export function buildRagChain(deps: {
 }): Runnable<RagInput, RagOutput> {
   const k = deps.k ?? 5;
 
+  // Lambdas that invoke other runnables must hand on the config they receive,
+  // or callbacks (DEBUG tracing), tags and abort signals stop at the lambda.
   // The retriever is typed with generic metadata; PrismaVectorStore always fills ChunkMetadata.
   const retrieve = RunnableLambda.from(
-    async (input: RagInput) =>
+    async (input: RagInput, config?: RunnableConfig) =>
       (await deps.store
         .asRetriever({ k, filter: { documentIds: input.fileIds } })
-        .invoke(input.question)) as Document<ChunkMetadata>[]
+        .invoke(input.question, config)) as Document<ChunkMetadata>[]
   );
 
   const answer = RunnableSequence.from([
@@ -68,7 +70,10 @@ export function buildRagChain(deps: {
     RunnablePassthrough.assign<RagInput, Pick<WithDocs, 'docs'>>({ docs: retrieve }),
     RunnableBranch.from<WithDocs, RagOutput>([
       [(input) => input.docs.length === 0, () => ({ answer: NO_RESULTS_ANSWER, docs: [] })],
-      RunnableLambda.from(async (input: WithDocs) => ({ answer: await answer.invoke(input), docs: input.docs })),
+      RunnableLambda.from(async (input: WithDocs, config?: RunnableConfig) => ({
+        answer: await answer.invoke(input, config),
+        docs: input.docs,
+      })),
     ]),
   ]);
 }

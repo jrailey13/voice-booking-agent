@@ -3,7 +3,7 @@
 **Role:** Systems Architect (DESIGN)
 **Date:** 2026-10-05
 **Inputs:** [`langchain-fit-assessment.md`](./langchain-fit-assessment.md). Constraints C1–C5, S1–S3, FR1–FR4 and NFR1–NFR3 are referenced by ID.
-**Scope:** Area 1 (`agent/` CLI) and Area 2 (RAG service). Area 4 (the booking agent) is **deferred** until Q1, qwen2.5's measured latency, is answered. It is shown only as an evolution path (§9).
+**Scope:** Area 1 (`agent/` CLI) and Area 2 (RAG service). Area 4 (the booking agent) was deferred here until Q1, qwen2.5's measured latency, was answered. It was later built behind a flag, with its own design doc: [`booking-agent-design.md`](booking-agent-design.md).
 **Status:** Proposed. Phase 0 spike is complete (2026-10-05). See §12 for the results and the corrections they caused.
 
 ---
@@ -16,7 +16,7 @@ The fit assessment left Q2–Q5 open. This design takes these positions so it ca
 |---|---|---|
 | Q2 (accept a latency regression?) | Not needed. Areas 1 and 2 are off the voice path. | C2 is untouched |
 | Q3 (LangGraph?) | **Yes, indirectly.** `createAgent` in `langchain@1.x` is built on LangGraph, so the checkpointer, interrupts and threads are all real LangGraph concepts. A hand-built `StateGraph` is an optional later exercise (§9). | Nothing is lost if the user later wants explicit graphs |
-| Q4 (fix the history bug first?) | Out of scope here. It is a separate one-line fix in `apps/api`. | Independent |
+| Q4 (fix the history bug first?) | Out of scope here. Fixed separately in `apps/api` (`lib/conversationHistory.ts`). | Done |
 | Q5 (zod 4 compatibility) | **Resolved:** `langchain@1.5.15` depends on `zod ^3.25.76 \|\| ^4`, and `@langchain/langgraph` has a peer dependency of `zod ^4.2.0` | Verified from the npm registry, 2026-10-05 |
 
 ---
@@ -354,7 +354,7 @@ Each phase ships as its own reversible commit series (S2). Phase 2 does not depe
 | Hand-built `StateGraph` agent (Q3 deep dive) | After Phase 1, for learning | Rebuild §4 as explicit `model` → `tools` → `approval` nodes, and compare it with `createAgent` |
 | `SqliteSaver` checkpointer | When agent threads should survive restarts | Swaps in through `AgentDeps.checkpointer` with no other change |
 | pgvector + `PGVectorStore` | When the corpus gets large enough that brute-force search is slow | Add a migration for a `vector(768)` column. `PrismaVectorStore` is behind the `VectorStore` interface, so the chain does not change. |
-| **Area 4: booking agent** | After Q1 is measured and Q2 is answered | Reuse `lib/ai/models.ts` and the patterns proven here: tools `check_availability` / `create_appointment`, the call-limit middleware, and structured output for extraction. Must satisfy FR2 (no false confirmation) and C2. It gets its own design doc. |
+| **Area 4: booking agent** | **Done, behind `BOOKING_AGENT=true`** (2026-10-05) | Tools `check_availability` / `book_appointment`, a bounded `bindTools` loop, and a code-level FR2 guard. Off by default because of C2. Design, decisions (ADR-006 to ADR-009) and measured latency: [`booking-agent-design.md`](booking-agent-design.md). |
 
 ---
 
@@ -439,7 +439,7 @@ Environment: Windows 11, CPU only, Node 25.1, Ollama 0.34.4. The spike scripts a
 3. **§4.3, typing.** Tool maps need `StructuredToolInterface`.
 4. **§6, supply chain.** The agent lockfile is gitignored and `legacy-peer-deps` is on. Fix both in Phase 1.
 5. **Agent latency expectation.** A two-step task (choose tool → answer) takes about 40–75s on this CPU. That is acceptable for a dev CLI. Keep the defaults for tool output size modest (`read_file` limit), because every character in context costs prefill time.
-6. **Area 4 signal (Q1, partial).** On this hardware a tool round-trip with qwen2.5 costs at least one extra 5–7s call, plus a slower answer call than gemma3's 16–27s. That already breaks the C2 latency budget for the voice path. Area 4 stays deferred until there is a faster tool-capable model or a GPU.
+6. **Area 4 signal (Q1, partial).** On this hardware a tool round-trip with qwen2.5 costs at least one extra 5–7s call, plus a slower answer call than gemma3's 16–27s. That already breaks the C2 latency budget for the voice path. Area 4 stays deferred until there is a faster tool-capable model or a GPU. *(Later: built as an opt-in mode instead, with the full Q1 measurement. See [`booking-agent-design.md`](booking-agent-design.md) §8.)*
 
 ---
 
@@ -465,7 +465,7 @@ Environment: Windows 11, CPU only, Node 25.1, Ollama 0.34.4. The spike scripts a
 3. **`OLLAMA_MODEL` is no longer read by the agent.** Older `.env` files set it to `gemma3`, which would have been silently ignored or would have failed. The agent reads only `AGENT_MODEL`.
 4. **Config is pure.** `loadConfig(env, cwd)` has no import-time side effects. dotenv and model construction moved to the entry point and bootstrap.
 5. **Removed as dead code:** `executor/agentExecutor.ts` (the regex loop), `tools/writeFile.ts` (unused), `types.ts`.
-6. **Not implemented:** the `DEBUG=true` console callback handler (§7). `DEBUG` prints stack traces only. It is a small follow-up if step-by-step tracing is wanted for learning.
+6. **`DEBUG=true` step tracing (§7): added after Phase 2.** `StepTracer` (`agent/runtime/stepTracer.ts`, `apps/api/src/lib/ai/stepTracer.ts`) is a callback handler that prints one line per model, tool or retriever step. Building it exposed a Phase 2 defect: the RAG chain's lambdas did not pass `config` to the runnables they invoked, so invoke-time callbacks never reached the retriever or the model. Fixed and pinned by a test in `chain.test.ts`.
 7. **Supply chain (§6 gap closed):** `agent/package-lock.json` is now tracked and `agent/.npmrc` (`legacy-peer-deps`) is removed.
 
 ---

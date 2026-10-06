@@ -1,5 +1,5 @@
 import { ollama } from './ollama';
-import { prisma } from './database';
+import { recentMessages } from './conversationHistory';
 
 /**
  * Booking-specific LLM chat function
@@ -10,12 +10,8 @@ export async function generateBookingResponse(
   conversationId: string
 ): Promise<string> {
   try {
-    // Get conversation history
-    const messages = await prisma.conversationMessage.findMany({
-      where: { conversationId },
-      orderBy: { createdAt: 'asc' },
-      take: 10, // Last 10 messages for context
-    });
+    // Get conversation history (the latest messages, oldest first)
+    const messages = await recentMessages(conversationId);
 
     // Build conversation context
     let conversationContext = '';
@@ -24,8 +20,13 @@ export async function generateBookingResponse(
       conversationContext += `${role}: ${msg.content}\n`;
     }
 
-    // Add current user message
-    conversationContext += `User: ${message}\nAssistant:`;
+    // Add the current user message, unless the caller already stored it as the
+    // latest turn (both services save it before asking for a reply).
+    const latest = messages[messages.length - 1];
+    if (!(latest && latest.role === 'user' && latest.content === message)) {
+      conversationContext += `User: ${message}\n`;
+    }
+    conversationContext += 'Assistant:';
 
     const systemPrompt = `You are a helpful booking assistant for a service provider. Your role is to:
 1. Help customers book appointments
@@ -78,24 +79,26 @@ Always respond as if you're continuing a conversation with the customer.`;
       }
     } catch (ollamaError) {
       console.warn('Ollama generation failed, using fallback response:', ollamaError);
-      // Fallback response based on message content
-      const lowerMessage = message.toLowerCase();
-      let fallbackResponse = '';
-      
-      if (lowerMessage.includes('book') || lowerMessage.includes('appointment')) {
-        fallbackResponse = "I'd be happy to help you book an appointment! What service are you interested in? We offer consultations, follow-ups, and initial assessments.";
-      } else if (lowerMessage.includes('morning') || lowerMessage.includes('afternoon')) {
-        fallbackResponse = "Perfect! I have several slots available. Would Tuesday at 2:00 PM work for you?";
-      } else if (lowerMessage.includes('yes') || lowerMessage.includes('confirm')) {
-        fallbackResponse = "Great! Your booking preferences have been noted. Please click 'Create Appointment' to finalize.";
-      } else {
-        fallbackResponse = "I'm here to help you schedule appointments. What day and time would work best for you?";
-      }
-      
-      return fallbackResponse;
+      return fallbackResponse(message);
     }
   } catch (error) {
     console.error('Error generating booking response:', error);
     throw new Error('Failed to generate booking response');
   }
+}
+
+/**
+ * Scripted reply for when the model is slow or unreachable, chosen by keyword
+ * so the call keeps moving (C3). Shared with the booking agent.
+ */
+export function fallbackResponse(message: string): string {
+  const lowerMessage = message.toLowerCase();
+  if (lowerMessage.includes('book') || lowerMessage.includes('appointment')) {
+    return "I'd be happy to help you book an appointment! What service are you interested in? We offer consultations, follow-ups, and initial assessments.";
+  } else if (lowerMessage.includes('morning') || lowerMessage.includes('afternoon')) {
+    return "Perfect! I have several slots available. Would Tuesday at 2:00 PM work for you?";
+  } else if (lowerMessage.includes('yes') || lowerMessage.includes('confirm')) {
+    return "Great! Your booking preferences have been noted. Please click 'Create Appointment' to finalize.";
+  }
+  return "I'm here to help you schedule appointments. What day and time would work best for you?";
 }

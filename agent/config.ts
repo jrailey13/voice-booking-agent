@@ -9,6 +9,8 @@ export interface Config {
   root: string
   maxModelCalls: number
   maxToolCalls: number
+  /** DEBUG=true: print each model and tool step (StepTracer) and error stacks. */
+  debug: boolean
 }
 
 function positiveInt(env: NodeJS.ProcessEnv, name: string, fallback: number): number {
@@ -42,5 +44,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, cwd: string = p
     root: path.resolve(cwd, env.AGENT_ROOT || "."),
     maxModelCalls: positiveInt(env, "AGENT_MAX_MODEL_CALLS", 12),
     maxToolCalls: positiveInt(env, "AGENT_MAX_TOOL_CALLS", 20),
+    debug: env.DEBUG === "true",
   }
 }

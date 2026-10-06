@@ -11,7 +11,14 @@ describe("loadConfig", () => {
       root: path.resolve("/work/repo"),
       maxModelCalls: 12,
       maxToolCalls: 20,
+      debug: false,
     })
+  })
+
+  it("turns on step tracing only for DEBUG=true", () => {
+    expect(loadConfig({ DEBUG: "true" }, "/r").debug).toBe(true)
+    expect(loadConfig({ DEBUG: "1" }, "/r").debug).toBe(false)
+    expect(loadConfig({ DEBUG: "false" }, "/r").debug).toBe(false)
   })
 
   it("reads overrides from the environment", () => {

@@ -3,9 +3,11 @@ import type { PrismaClient } from '@prisma/client';
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import type { EmbeddingsInterface } from '@langchain/core/embeddings';
 import type { Runnable } from '@langchain/core/runnables';
+import type { Callbacks } from '@langchain/core/callbacks/manager';
 import { RecursiveCharacterTextSplitter } from '@langchain/textsplitters';
 import { prisma } from '../lib/database';
 import { createChatModel, createEmbeddings } from '../lib/ai/models';
+import { debugCallbacks } from '../lib/ai/stepTracer';
 import { extractText } from '../lib/rag/extract';
 import { ingestDocument } from '../lib/rag/ingest';
 import { PrismaVectorStore } from '../lib/rag/prismaVectorStore';
@@ -39,6 +41,8 @@ export interface RagServiceDeps {
   db: Pick<PrismaClient, '$transaction' | 'ragChunk' | 'ragDocument' | 'queryLog'>;
   embeddings: EmbeddingsInterface;
   model: BaseChatModel;
+  /** Attached to every query run; defaults to a StepTracer when DEBUG=true. */
+  callbacks: Callbacks;
 }
 
 /**
@@ -60,9 +64,11 @@ export class RagService {
     chunkOverlap: this.CHUNK_OVERLAP,
   });
   private readonly chain: Runnable<RagInput, RagOutput>;
+  private readonly callbacks: Callbacks;
 
   constructor(deps: Partial<RagServiceDeps> = {}) {
     this.db = deps.db ?? prisma;
+    this.callbacks = deps.callbacks ?? debugCallbacks();
     this.embeddings = deps.embeddings ?? createEmbeddings();
     this.chain = buildRagChain({
       store: new PrismaVectorStore(this.embeddings, this.db),
@@ -92,7 +98,8 @@ export class RagService {
 
   async queryDocuments(question: string, fileIds: string[]): Promise<QueryResult> {
     try {
-      const { answer, docs } = await this.chain.invoke({ question, fileIds });
+      // Callbacks given at invoke time reach every nested run (retriever, model).
+      const { answer, docs } = await this.chain.invoke({ question, fileIds }, { callbacks: this.callbacks });
 
       if (docs.length === 0) {
         return { id: crypto.randomUUID(), answer, timestamp: new Date().toISOString(), sources: [] };

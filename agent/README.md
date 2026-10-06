@@ -57,7 +57,7 @@ Every path is resolved inside the root. `../`, absolute paths elsewhere, and lin
 | `AGENT_ROOT` | current directory | The sandbox for every tool |
 | `AGENT_MAX_MODEL_CALLS` | `12` | Per request. The run ends with a notice when it is reached. |
 | `AGENT_MAX_TOOL_CALLS` | `20` | Per request |
-| `DEBUG` | `false` | `true` prints stack traces |
+| `DEBUG` | `false` | `true` prints each model call and tool call as it happens, plus stack traces on errors |
 
 The agent **refuses to start** if `LANGSMITH_TRACING`, `LANGCHAIN_TRACING_V2`, `LANGCHAIN_TRACING`, `LANGSMITH_API_KEY` or `LANGCHAIN_API_KEY` is set. Any of them would send your code to LangSmith.
 

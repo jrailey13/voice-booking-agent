@@ -1,5 +1,5 @@
 import { prisma } from '../lib/database';
-import { generateBookingResponse } from '../lib/llm';
+import { respondToCaller } from '../lib/booking/respond';
 import { maybeCommitBooking, CommittedBooking } from '../lib/booking.commit';
 
 interface AvailabilityResult {
@@ -117,8 +117,9 @@ export class BookingService {
       },
     });
 
-    // Generate response using LLM
-    const response = await generateBookingResponse(message, conversation.id);
+    // Generate the reply. With BOOKING_AGENT=true this may also book, via the agent's tools.
+    const turn = await respondToCaller(message, conversation.id);
+    const response = turn.reply;
 
     // Save assistant message
     const assistantMessage = await prisma.conversationMessage.create({
@@ -129,9 +130,10 @@ export class BookingService {
       },
     });
 
-    // If the conversation has reached a concrete, available booking, commit it.
-    // Returns null (and never throws) when there is nothing to book yet.
-    const appointment = await maybeCommitBooking(conversation.id);
+    // If the agent booked this turn, that is the booking. Otherwise, if the
+    // conversation has reached a concrete, available booking, commit it.
+    // maybeCommitBooking returns null (and never throws) when there is nothing to book.
+    const appointment = turn.booking ?? (await maybeCommitBooking(conversation.id));
 
     return {
       id: assistantMessage.id,

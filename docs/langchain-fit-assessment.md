@@ -54,7 +54,10 @@ Something can meet O1 without meeting O2. That is acceptable if we say so openly
 We should not let these get blamed on, or "fixed by", a framework:
 
 1. **The context window holds the *first* 10 messages, not the *last* 10.** Both `lib/llm.ts:14` and `lib/booking.commit.ts:98` run `orderBy: createdAt asc` + `take: 10`. After 10 messages the model stops seeing new turns. `assistantConfirmed()` keeps checking an old assistant message. The README says "last 10 turns."
+   *Fixed 2026-10-05:* both now read through `lib/conversationHistory.ts` (`recentMessages`: newest 10, returned oldest first). The fix also stopped the reply prompt from repeating the caller's message, which the services store before asking for a reply. The old window had hidden that duplicate.
 2. **A caller can be told "you're booked" when nothing was booked.** The reply model "confirms" against slot times hardcoded in its system prompt. It never checks real availability. If the slot is taken, `maybeCommitBooking` quietly returns `null` (`booking.commit.ts:121`), but the caller has already heard the confirmation.
+
+   *Addressed behind a flag 2026-10-05:* with `BOOKING_AGENT=true` the model books through tools, and a code-level guard replaces any confirmation the tools did not back. See `docs/booking-agent-design.md`. The default path still has this defect.
 
 Defect 2 is a **real user problem**, and it is the strongest product argument for anything that lets the model consult real state before it speaks. LangChain is one route to that, not the only one.
 

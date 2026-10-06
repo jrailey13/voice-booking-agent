@@ -10,6 +10,7 @@ import {
 import { Command, type BaseCheckpointSaver } from "@langchain/langgraph"
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models"
 import type { BaseMessage } from "@langchain/core/messages"
+import type { Callbacks } from "@langchain/core/callbacks/manager"
 import type { StructuredToolInterface } from "@langchain/core/tools"
 import type { AgentIO } from "../runtime/io"
 
@@ -82,13 +83,25 @@ function textOf(message: BaseMessage | undefined): string {
     .join("")
 }
 
+export interface ConverseOptions {
+  /** LangChain callback handlers for the turn, e.g. a StepTracer when DEBUG=true. */
+  callbacks?: Callbacks
+}
+
 /**
  * Run one user turn on a persistent thread. Whenever the agent pauses for
  * approval, ask the human through `io` and resume with their decisions.
  * Returns the agent's final text for the turn.
  */
-export async function converse(agent: Agent, threadId: string, userText: string, io: AgentIO): Promise<string> {
-  const config = { configurable: { thread_id: threadId }, recursionLimit: RECURSION_BACKSTOP }
+export async function converse(
+  agent: Agent,
+  threadId: string,
+  userText: string,
+  io: AgentIO,
+  options: ConverseOptions = {}
+): Promise<string> {
+  // Callbacks passed at invoke time reach every nested run: model calls, tools, middleware.
+  const config = { configurable: { thread_id: threadId }, recursionLimit: RECURSION_BACKSTOP, callbacks: options.callbacks }
   let result = await agent.invoke({ messages: [{ role: "user", content: userText }] }, config)
 
   for (;;) {

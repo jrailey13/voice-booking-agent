@@ -184,3 +184,64 @@ export class FakeRagDb {
     this.failNextWrite = false
   }
 }
+
+interface AppointmentRow {
+  id: string
+  date: string
+  time: string
+  service: string
+  customerName: string | null
+  customerContact: string | null
+  status: string
+}
+interface ConversationRow { id: string; appointmentId: string | null }
+
+/** In-memory stand-in for prisma.appointment / conversation / $transaction, as the booking tools use them. */
+export class FakeBookingDb {
+  appointments: AppointmentRow[] = []
+  conversations: ConversationRow[] = []
+  failNextCreate = false
+  private seq = 0
+
+  appointment = {
+    findFirst: async ({ where }: { where: { date: string; time: string; status: { in: string[] } } }) =>
+      this.appointments.find((a) => a.date === where.date && a.time === where.time && where.status.in.includes(a.status)) ?? null,
+    findMany: async ({ where }: { where: { date: string; status: { in: string[] } } }) =>
+      this.appointments.filter((a) => a.date === where.date && where.status.in.includes(a.status)),
+    findUnique: async ({ where }: { where: { id: string } }) => this.appointments.find((a) => a.id === where.id) ?? null,
+    create: async ({ data }: { data: Omit<AppointmentRow, 'id' | 'customerName' | 'customerContact'> & Partial<AppointmentRow> }) => {
+      if (this.failNextCreate) {
+        this.failNextCreate = false
+        throw new Error('fake db: create failed')
+      }
+      const row: AppointmentRow = { customerName: null, customerContact: null, ...data, id: `appt${++this.seq}` }
+      this.appointments.push(row)
+      return row
+    },
+  }
+
+  conversation = {
+    findUnique: async ({ where }: { where: { id: string } }) => this.conversations.find((c) => c.id === where.id) ?? null,
+    update: async ({ where, data }: { where: { id: string }; data: { appointmentId: string } }) => {
+      const conv = this.conversations.find((c) => c.id === where.id)
+      if (!conv) throw new Error('fake db: conversation not found')
+      conv.appointmentId = data.appointmentId
+      return conv
+    },
+  }
+
+  /** Interactive transactions: all-or-nothing over the in-memory tables. */
+  $transaction = async <T>(fn: (tx: FakeBookingDb) => Promise<T>): Promise<T> => {
+    const snapshot = {
+      appointments: this.appointments.map((a) => ({ ...a })),
+      conversations: this.conversations.map((c) => ({ ...c })),
+    }
+    try {
+      return await fn(this)
+    } catch (error) {
+      this.appointments = snapshot.appointments
+      this.conversations = snapshot.conversations
+      throw error
+    }
+  }
+}

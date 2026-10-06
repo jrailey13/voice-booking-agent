@@ -1,5 +1,6 @@
 import { prisma } from './database';
 import { extractBooking } from './booking.extractor';
+import { recentMessages } from './conversationHistory';
 
 /**
  * An appointment that was just written to the database as a result of the
@@ -14,14 +15,10 @@ export interface CommittedBooking {
   customerContact: string | null;
 }
 
-// How many recent turns to feed the extractor. Matches the context window used
-// for generation in generateBookingResponse.
-const CONTEXT_TURNS = 10;
-
 // Extraction is a second full LLM call, so we only pay for it once the assistant
 // signals the conversation has actually closed on a booking. This is a cheap
 // pre-gate, not the source of truth — the extractor still validates everything.
-const CONFIRMATION_CUE =
+export const CONFIRMATION_CUE =
   /\b(booked|confirm(?:ed)?|scheduled|reserv(?:e|ed)|all set|you'?re set|see you|locked in)\b/i;
 
 // A cheap signal that the caller is amending a detail (e.g. correcting a
@@ -43,7 +40,7 @@ function assistantConfirmed(
   return false;
 }
 
-function toCommitted(appt: {
+export function toCommitted(appt: {
   id: string;
   date: string;
   time: string;
@@ -95,11 +92,9 @@ export async function maybeCommitBooking(
     });
     if (!conversation) return null;
 
-    const messages = await prisma.conversationMessage.findMany({
-      where: { conversationId },
-      orderBy: { createdAt: 'asc' },
-      take: CONTEXT_TURNS,
-    });
+    // The same recent window the reply model saw, so the confirmation cue is
+    // checked against the latest assistant turn.
+    const messages = await recentMessages(conversationId);
 
     // Already booked: the only work left is capturing or correcting customer
     // details. This is not gated by the confirmation cue — a correction ("fix
