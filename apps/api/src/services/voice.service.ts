@@ -4,7 +4,7 @@ import path from 'path';
 import { WebSocket } from 'ws';
 import { prisma } from '../lib/database';
 import { transcribeAudio, checkWhisperQuota, getMonthlyUsageStats } from '../lib/whisper';
-import { generateBookingResponse } from '../lib/llm';
+import { respondToCaller } from '../lib/booking/respond';
 import { maybeCommitBooking } from '../lib/booking.commit';
 
 interface StartCallResult {
@@ -208,8 +208,10 @@ export class VoiceService {
         });
 
         // Generate booking response
+        // With BOOKING_AGENT=true this may also book, via the agent's tools.
         const llmStart = Date.now();
-        const assistantResponse = await generateBookingResponse(transcript, call.conversationId);
+        const turn = await respondToCaller(transcript, call.conversationId);
+        const assistantResponse = turn.reply;
         const llmMs = Date.now() - llmStart;
 
         // Send assistant response
@@ -229,10 +231,11 @@ export class VoiceService {
           },
         });
 
-        // If the conversation has reached a concrete, available booking, commit
-        // it and tell the client so it can surface the confirmed appointment.
+        // If the agent booked this turn, that is the booking. Otherwise, if the
+        // conversation has reached a concrete, available booking, commit it.
+        // Either way, tell the client so it can surface the appointment.
         const commitStart = Date.now();
-        const appointment = await maybeCommitBooking(call.conversationId);
+        const appointment = turn.booking ?? (await maybeCommitBooking(call.conversationId));
         const commitMs = Date.now() - commitStart;
         if (appointment) {
           socket.send(JSON.stringify({

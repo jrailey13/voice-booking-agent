@@ -18,7 +18,7 @@ export interface CommittedBooking {
 // Extraction is a second full LLM call, so we only pay for it once the assistant
 // signals the conversation has actually closed on a booking. This is a cheap
 // pre-gate, not the source of truth — the extractor still validates everything.
-const CONFIRMATION_CUE =
+export const CONFIRMATION_CUE =
   /\b(booked|confirm(?:ed)?|scheduled|reserv(?:e|ed)|all set|you'?re set|see you|locked in)\b/i;
 
 // A cheap signal that the caller is amending a detail (e.g. correcting a
@@ -40,7 +40,7 @@ function assistantConfirmed(
   return false;
 }
 
-function toCommitted(appt: {
+export function toCommitted(appt: {
   id: string;
   date: string;
   time: string;

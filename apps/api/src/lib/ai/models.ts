@@ -19,3 +19,17 @@ export function createChatModel(env: NodeJS.ProcessEnv = process.env): ChatOllam
 export function createEmbeddings(env: NodeJS.ProcessEnv = process.env): OllamaEmbeddings {
   return new OllamaEmbeddings({ model: env.EMBEDDING_MODEL || 'nomic-embed-text', baseUrl: baseUrl(env), ...NO_RETRIES });
 }
+
+/**
+ * The booking agent's model (BOOKING_AGENT=true). Separate from LLM_MODEL
+ * because the agent needs tool calling, which gemma3 lacks (ADR-009). Low
+ * temperature keeps tool arguments consistent.
+ */
+export function createBookingAgentModel(env: NodeJS.ProcessEnv = process.env): ChatOllama {
+  return new ChatOllama({
+    model: env.BOOKING_AGENT_MODEL || 'qwen2.5:7b-instruct',
+    temperature: 0.2,
+    baseUrl: baseUrl(env),
+    ...NO_RETRIES,
+  });
+}

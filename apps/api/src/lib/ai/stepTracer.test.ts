@@ -3,7 +3,10 @@ import { Embeddings } from '@langchain/core/embeddings';
 import { FakeListChatModel } from '@langchain/core/utils/testing';
 import { StepTracer, debugCallbacks } from './stepTracer';
 import { RagService } from '../../services/rag.service';
-import { FakeRagDb, embedText } from '../../test/fakes';
+import { AIMessage } from '@langchain/core/messages';
+import { FakeRagDb, FakeBookingDb, embedText } from '../../test/fakes';
+import { ScriptedModel, toolCall } from '../../test/scriptedModel';
+import { runBookingTurn } from '../booking/agent';
 
 class WordEmbeddings extends Embeddings {
   constructor() { super({}); }
@@ -38,6 +41,27 @@ describe('StepTracer', () => {
       '· retriever 0.5s → 1 docs (hours.txt)',
       '· model     started (2 messages)',
       '· model     0.5s → answer (17 chars)',
+    ]);
+  });
+
+  it('prints the tool calls of a booking turn', async () => {
+    const db = new FakeBookingDb();
+    db.conversations.push({ id: 'conv-1', appointmentId: null });
+    const tracer = new StepTracer((line) => lines.push(line), steppingClock());
+    const model = new ScriptedModel([
+      toolCall('check_availability', { date: '2026-10-06' }),
+      new AIMessage('2 PM is open.'),
+    ]);
+
+    await runBookingTurn({ model, db: db as never, callbacks: [tracer] }, { message: 'Is 2 open?', conversationId: 'conv-1', history: [] });
+
+    expect(lines).toEqual([
+      '· model     started (2 messages)',
+      '· model     0.5s → tool calls: check_availability',
+      '· tool      check_availability {"date":"2026-10-06"}',
+      expect.stringMatching(/^· tool {6}check_availability 0\.5s → \d+ chars$/),
+      '· model     started (4 messages)',
+      '· model     0.5s → answer (13 chars)',
     ]);
   });
 

@@ -10,6 +10,7 @@ import { ragRoutes } from './routes/rag';
 import { bookingRoutes } from './routes/booking';
 import { voiceRoutes } from './routes/voice';
 import { assertNoRemoteTracing } from './lib/ai/guards';
+import { assertBookingAgentReady } from './lib/booking/respond';
 
 const server = Fastify({
   logger: process.env.NODE_ENV === 'development' ? {
@@ -21,6 +22,7 @@ const start = async () => {
   try {
     // Refuse to run if LangChain tracing would ship prompts/documents off-host.
     assertNoRemoteTracing();
+    await assertBookingAgentReady();
 
     // Register plugins
     await server.register(cors, {
