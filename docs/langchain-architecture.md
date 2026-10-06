@@ -3,7 +3,7 @@
 **Role:** Systems Architect (DESIGN)
 **Date:** 2026-10-05
 **Inputs:** [`langchain-fit-assessment.md`](./langchain-fit-assessment.md). Constraints C1–C5, S1–S3, FR1–FR4 and NFR1–NFR3 are referenced by ID.
-**Scope:** Area 1 (`agent/` CLI) and Area 2 (RAG service). Area 4 (the booking agent) is **deferred** until Q1, qwen2.5's measured latency, is answered. It is shown only as an evolution path (§9).
+**Scope:** Area 1 (`agent/` CLI) and Area 2 (RAG service). Area 4 (the booking agent) was deferred here until Q1, qwen2.5's measured latency, was answered. It was later built behind a flag, with its own design doc: [`booking-agent-design.md`](booking-agent-design.md).
 **Status:** Proposed. Phase 0 spike is complete (2026-10-05). See §12 for the results and the corrections they caused.
 
 ---
@@ -354,7 +354,7 @@ Each phase ships as its own reversible commit series (S2). Phase 2 does not depe
 | Hand-built `StateGraph` agent (Q3 deep dive) | After Phase 1, for learning | Rebuild §4 as explicit `model` → `tools` → `approval` nodes, and compare it with `createAgent` |
 | `SqliteSaver` checkpointer | When agent threads should survive restarts | Swaps in through `AgentDeps.checkpointer` with no other change |
 | pgvector + `PGVectorStore` | When the corpus gets large enough that brute-force search is slow | Add a migration for a `vector(768)` column. `PrismaVectorStore` is behind the `VectorStore` interface, so the chain does not change. |
-| **Area 4: booking agent** | After Q1 is measured and Q2 is answered | Reuse `lib/ai/models.ts` and the patterns proven here: tools `check_availability` / `create_appointment`, the call-limit middleware, and structured output for extraction. Must satisfy FR2 (no false confirmation) and C2. It gets its own design doc. |
+| **Area 4: booking agent** | **Done, behind `BOOKING_AGENT=true`** (2026-10-05) | Tools `check_availability` / `book_appointment`, a bounded `bindTools` loop, and a code-level FR2 guard. Off by default because of C2. Design, decisions (ADR-006 to ADR-009) and measured latency: [`booking-agent-design.md`](booking-agent-design.md). |
 
 ---
 
@@ -439,7 +439,7 @@ Environment: Windows 11, CPU only, Node 25.1, Ollama 0.34.4. The spike scripts a
 3. **§4.3, typing.** Tool maps need `StructuredToolInterface`.
 4. **§6, supply chain.** The agent lockfile is gitignored and `legacy-peer-deps` is on. Fix both in Phase 1.
 5. **Agent latency expectation.** A two-step task (choose tool → answer) takes about 40–75s on this CPU. That is acceptable for a dev CLI. Keep the defaults for tool output size modest (`read_file` limit), because every character in context costs prefill time.
-6. **Area 4 signal (Q1, partial).** On this hardware a tool round-trip with qwen2.5 costs at least one extra 5–7s call, plus a slower answer call than gemma3's 16–27s. That already breaks the C2 latency budget for the voice path. Area 4 stays deferred until there is a faster tool-capable model or a GPU.
+6. **Area 4 signal (Q1, partial).** On this hardware a tool round-trip with qwen2.5 costs at least one extra 5–7s call, plus a slower answer call than gemma3's 16–27s. That already breaks the C2 latency budget for the voice path. Area 4 stays deferred until there is a faster tool-capable model or a GPU. *(Later: built as an opt-in mode instead, with the full Q1 measurement. See [`booking-agent-design.md`](booking-agent-design.md) §8.)*
 
 ---
 

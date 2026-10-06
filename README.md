@@ -48,7 +48,7 @@ sequenceDiagram
     A->>P: duration, transcript, status
 ```
 
-The socket emits a small state machine the UI renders directly: `connected`, `listening`, `processing`, `muted`, `error`. Conversation context is the last 10 stored turns, replayed into the prompt on every request, which is what lets a caller say "yes, that works" three turns after a time was proposed.
+The socket emits a small state machine the UI renders directly: `connected`, `listening`, `processing`, `muted`, `error`. Conversation context is the last 10 stored messages, replayed into the prompt on every request, which is what lets a caller say "yes, that works" three turns after a time was proposed.
 
 ## Reliability and degradation
 
@@ -56,6 +56,12 @@ Both speech-to-text and generation run locally, so there is no per-request bill 
 
 - **Graceful degradation.** If the local LLM is unreachable or exceeds `OLLAMA_TIMEOUT_MS` (default 30s), the agent falls back to scripted booking replies rather than dropping the call. A model outage degrades the conversation instead of ending it.
 - **Usage tracking.** Minutes and call counts are recorded per day in `whisper_usage` and exposed via `GET /api/voice/quota`.
+
+## Booking agent mode (opt-in)
+
+By default the reply model can say "you're booked" before anything is written. A separate extraction pass then tries to commit the booking, and it quietly gives up if the slot is taken. Setting `BOOKING_AGENT=true` switches the reply to a LangChain tool-calling agent on `qwen2.5:7b-instruct`. It checks real availability and writes the booking through `check_availability` / `book_appointment` tools during the turn. A code-level guard replaces any confirmation the tools did not back, so the caller cannot be told about a booking that does not exist.
+
+It is off by default because each tool call is another model pass on CPU. Measured median turn time was similar (30.3s vs 29.7s), but the spread was wider (up to 53s), and it keeps a second model loaded. Design, decisions and measurements: [`docs/booking-agent-design.md`](docs/booking-agent-design.md).
 
 The usage/quota machinery began as a spend meter for the OpenAI Whisper API. With transcription now local it reports $0 and is retained only as a usage stat — a candidate for removal.
 
@@ -135,7 +141,7 @@ No API keys are required — every model runs locally. On the first transcriptio
 Worth stating plainly rather than leaving to be discovered:
 
 - **Not a phone system.** Audio is captured from the browser microphone and streamed over a WebSocket. There is no Twilio, SIP, or PSTN integration, so this does not answer real phone calls.
-- **Booking commit depends on the model's extraction.** Once the assistant confirms, a second JSON-mode model call extracts the date, time, service, and contact; the result is validated with Zod, dates and times are normalized with chrono and snapped to a real slot, and only then is the appointment written and linked to the conversation (idempotent per conversation). Availability is checked before the write, but the check-then-insert is not atomic, so concurrent commits could still collide. The extracted fields are only as reliable as the model's response.
+- **Booking commit depends on the model's extraction.** Once the assistant confirms, a second JSON-mode model call extracts the date, time, service, and contact; the result is validated with Zod, dates and times are normalized with chrono and snapped to a real slot, and only then is the appointment written and linked to the conversation (idempotent per conversation). Availability is checked before the write, but the check-then-insert is not atomic, so concurrent commits could still collide. The extracted fields are only as reliable as the model's response. Booking agent mode (above) avoids this by booking through tools inside one transaction, at a latency cost.
 - **Availability is simplified.** Open slots are a fixed daily list minus already-booked times. No provider calendars, durations, buffers, or business-hours rules.
 - **Single-tenant and unauthenticated.** No accounts, no per-business isolation, no authorization on any route.
 - **Not deployed.** Local development only.

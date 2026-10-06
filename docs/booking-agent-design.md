@@ -104,6 +104,36 @@ respondToCaller(message: string, conversationId: string): Promise<BookingTurnRes
 - **Contract tests:** existing tests stay green, and with the flag off the services take the old path. One test pins that `respondToCaller` does not touch the agent when the flag is off.
 - **Live run:** qwen2.5 against Postgres through `POST /api/booking/chat`, covering a normal booking, a taken slot (FR2), and turn latency against the flag-off baseline (Q1).
 
-## 8. Results
+## 8. Results (2026-10-05)
 
-*Filled in after implementation.*
+**Built and verified offline:** 129 API tests pass and `tsc` is clean. The tests cover the tools, the loop, the FR2 guard, the bounds, abort, fallback and the flag switch.
+
+**Live, through `POST /api/booking/chat`** (CPU only, local Postgres):
+
+| Scenario | Agent off (gemma3, existing path) | Agent on (qwen2.5 + tools) |
+|---|---|---|
+| "Tomorrow at 2 PM, I'm Sam" | Booked by extraction. The *spoken* reply called tomorrow "October 26th" (it is October 6) and confirmed on the next turn. | One `book_appointment` call, written in 0.1s. The reply matched the row. |
+| Taken slot (tomorrow 10 AM) | Not run. Today's path can confirm a taken slot by construction (§1). | Tool refused and nothing was written. The guard replaced the model's reply. The caller then chose 11 AM, which was booked. |
+
+**Q1, turn latency (seconds, whole HTTP turn = model + commit):**
+
+| | Samples | Median | Range |
+|---|---|---|---|
+| Agent off | 28.7, 30.0, 28.1, 32.0, 29.4, 37.2 (3 measured conversations, warm) | **29.7** | 28.1–37.2 |
+| Agent on | 30.3, 25.7, 53.0, 50.9, 20.7 (ad-hoc conversations, warm, after the prompt fix) | **30.3** | 20.7–53.0 |
+
+Per step, from the `DEBUG=true` trace: a model call that picks a tool takes 11–13s, the answer after a tool result takes 8–22s, and a tool runs in 0.1s. A plain answer with no tool takes 30–34s.
+
+**Reading:** the medians are close, because the agent mode drops the separate extraction pass that commit turns pay for today. The spread is much worse: turns with a refusal or a long history reached 51–53s. With 5 samples, C2 (≤10% regression) is **not shown to hold**, so the flag stays **off by default**.
+
+**The controlled agent-on runs did not complete.** Claude Code stopped the background measurement because the machine ran critically low on memory. Agent mode keeps qwen2.5 (7B) loaded next to gemma3, which RAG and extraction still use, and this machine struggles to hold both. **That is a deployment finding in its own right:** run agent mode on a machine with headroom for two models, or point `LLM_MODEL` at the same qwen2.5 so only one model is resident.
+
+**Behaviour fixes made during the live run:**
+1. The first prompt said to book "only once the caller has agreed". qwen2.5 kept re-checking availability and asking again, so it never booked. The prompt and tool description now say: book as soon as day, time and service are named, because the tool checks availability itself. This also saves a model call per booking.
+2. The tool result included the appointment id, and the model read it aloud. Removed; the client receives the row itself.
+3. The guard's false positive ("10 AM is already **booked**") replaced a useful refusal with the generic tentative reply. Now, when the tool refused, the guard speaks the tool's own refusal ("Sorry, 10:00 AM on Tuesday, October 6 is already taken. Open times: …"). That is true by construction.
+
+**Known limitations:**
+- When the model retried a booking after a refusal, it omitted the caller's name, which was given on an earlier turn. The appointment was written without it. The existing `enrichBooking` path fills it in on the next turn, at the cost of one extraction call.
+- The guard still uses the shared regex cue, so a harmless reply that mentions "booked" without a refusal behind it becomes the tentative reply. This is safe but sometimes stilted (ADR-007).
+- History stores only text, so the model does not see its own earlier tool calls. It relies on the stored replies and on the tools to re-derive state.
