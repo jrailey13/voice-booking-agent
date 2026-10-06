@@ -85,6 +85,17 @@ describe('buildRagChain', () => {
     expect(model.seen).toEqual([]);
   });
 
+  it('passes invoke-time callbacks down to the retriever and the model', async () => {
+    const events: string[] = [];
+    const handler = {
+      handleRetrieverStart: async () => { events.push('retriever'); },
+      handleChatModelStart: async () => { events.push('model'); },
+    };
+    await buildRagChain({ store, model: new RecordingModel({ responses: ['x'] }) })
+      .invoke({ question: 'When will it open?', fileIds: ['hours.txt'] }, { callbacks: [handler] });
+    expect(events).toEqual(['retriever', 'model']);
+  });
+
   it('defaults to 5 chunks', async () => {
     await buildRagChain({ store, model: new RecordingModel({ responses: ['x'] }) }).invoke({ question: 'Q', fileIds: ['hours.txt'] });
     expect(searchArgs()[0].k).toBe(5);
