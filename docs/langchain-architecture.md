@@ -124,7 +124,7 @@ export interface AgentIO {
 
 // tools/sandbox.ts
 export class PathEscapeError extends Error {}
-export function resolveInsideRoot(root: string, requested: string): string; // realpath-based, rejects ".." and symlink escapes
+export async function resolveInsideRoot(root: string, requested: string): Promise<string>; // realpath-based, rejects ".." and link escapes (async: realpath)
 
 // tools/agentTools.ts
 export interface ToolContext { root: string; io: AgentIO }
@@ -340,7 +340,7 @@ export async function ingestDocument(
 | Phase | Work | Exit criteria |
 |---|---|---|
 | **0. Spike** (½ day) — ✅ **done**, §12 | `npm install` in `agent/` (it is not installed today). Add packages to the API. Typecheck a subpath import under node10 resolution. Confirm the `humanInTheLoopMiddleware` resume payload shape against the installed version. Run one `bindTools` call on qwen2.5 by hand (the Option A kata). | Typecheck is green in both packages. One real tool call has round-tripped. |
-| **1. Agent** | guards, capability, sandbox, tools, `createAgent`, `converse`, tests, docs | §4.7 tests are green. A manual session reads files, remembers context across turns, and asks before writing. |
+| **1. Agent** — ✅ **done**, §13 | guards, capability, sandbox, tools, `createAgent`, `converse`, tests, docs | §4.7 tests are green. A manual session reads files, remembers context across turns, and asks before writing. |
 | **2. RAG** | models, store, ingest, chain, service rewiring, tests, docs | §5.7 tests are green. Existing API tests are green. A manual upload and query through the web UI returns the same response shape. |
 
 Each phase ships as its own reversible commit series (S2). Phase 2 does not depend on Phase 1.
@@ -440,3 +440,30 @@ Environment: Windows 11, CPU only, Node 25.1, Ollama 0.34.4. The spike scripts a
 4. **§6, supply chain.** The agent lockfile is gitignored and `legacy-peer-deps` is on. Fix both in Phase 1.
 5. **Agent latency expectation.** A two-step task (choose tool → answer) takes about 40–75s on this CPU. That is acceptable for a dev CLI. Keep the defaults for tool output size modest (`read_file` limit), because every character in context costs prefill time.
 6. **Area 4 signal (Q1, partial).** On this hardware a tool round-trip with qwen2.5 costs at least one extra 5–7s call, plus a slower answer call than gemma3's 16–27s. That already breaks the C2 latency budget for the voice path. Area 4 stays deferred until there is a faster tool-capable model or a GPU.
+
+---
+
+## 13. Phase 1 results (2026-10-05)
+
+**Exit criteria met.**
+
+- **Offline:** 58 vitest tests in `agent/` (guards, capability, sandbox, tools, config, bootstrap, agent), and `tsc --noEmit` is clean.
+- **Live, `qwen2.5:7b-instruct`, scripted three-turn session:**
+
+| Turn | Result | Time |
+|---|---|---|
+| "Which web framework does the API use?" | Read `apps/api/package.json` and answered Fastify | 128s (includes the cold model load) |
+| "Which file did you just read?" | Answered `apps/api/package.json` from memory | 9s |
+| "Write a summary to notes/smoke.md" | One approval prompt. Declined. Nothing written. The agent acknowledged the refusal. | 30s |
+
+- **CLI startup refusals verified:** `AGENT_MODEL=gemma3` gives "does not support tool calling", and `LANGSMITH_TRACING=true` gives a refusal before Ollama is contacted.
+
+### Differences from the design
+
+1. **Recursion backstop (new).** LangGraph's default `recursionLimit` of 25 counts every node visit, including middleware hooks. That is fewer steps than the §4.5 call limits need, so at the default limits runs died with `GraphRecursionError` before the middleware could end them. `converse` now sets `recursionLimit: RECURSION_BACKSTOP` (500), so the middleware is the binding limit. A regression test pins this.
+2. **`resolveInsideRoot` is async**, because `realpath` is async. Not-yet-existing write targets are handled by resolving the deepest existing ancestor.
+3. **`OLLAMA_MODEL` is no longer read by the agent.** Older `.env` files set it to `gemma3`, which would have been silently ignored or would have failed. The agent reads only `AGENT_MODEL`.
+4. **Config is pure.** `loadConfig(env, cwd)` has no import-time side effects. dotenv and model construction moved to the entry point and bootstrap.
+5. **Removed as dead code:** `executor/agentExecutor.ts` (the regex loop), `tools/writeFile.ts` (unused), `types.ts`.
+6. **Not implemented:** the `DEBUG=true` console callback handler (§7). `DEBUG` prints stack traces only. It is a small follow-up if step-by-step tracing is wanted for learning.
+7. **Supply chain (§6 gap closed):** `agent/package-lock.json` is now tracked and `agent/.npmrc` (`legacy-peer-deps`) is removed.
