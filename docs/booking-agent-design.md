@@ -1,6 +1,6 @@
 # Booking Agent (Area 4): Design
 
-**Status:** Implemented behind a flag (`BOOKING_AGENT=true`, default off). Results are in §8.
+**Status:** Implemented behind a flag (`BOOKING_AGENT=true`, default off). Results are in §8 and §9.
 **Inputs:** `docs/langchain-fit-assessment.md` (Area 4, FR2, C2–C4, Q1–Q2) and `docs/langchain-architecture.md` (§9, §12 item 6).
 
 ## 1. Problem
@@ -138,3 +138,24 @@ Per step, from the `DEBUG=true` trace: a model call that picks a tool takes 11�
 - When the model retried a booking after a refusal, it omitted the caller's name, which was given on an earlier turn. The appointment was written without it. The existing `enrichBooking` path fills it in on the next turn, at the cost of one extraction call.
 - The guard still uses the shared regex cue, so a harmless reply that mentions "booked" without a refusal behind it becomes the tentative reply. This is safe but sometimes stilted (ADR-007).
 - History stores only text, so the model does not see its own earlier tool calls. It relies on the stored replies and on the tools to re-derive state.
+
+## 9. Controlled latency run, one model resident (2026-10-06)
+
+This re-runs the measurement §8 could not finish, avoiding the memory pressure it hit. In agent mode, `LLM_MODEL` was set to `qwen2.5:7b-instruct` as well, so replies, extraction and the agent all used one model, and `ollama ps` showed only qwen2.5 loaded. Agent off used gemma3 only. Each mode had a warm-up turn, then 5 conversations of two turns: "Hi, I'd like to book a consultation on <day> at <time>. My name is Pat Test." and "Thanks, that's all." CPU only, nothing else running, `DEBUG=true` for step timings. All 10 bookings were written. The test rows were deleted afterwards.
+
+| Seconds, whole HTTP turn | Agent off (gemma3) | Agent on (qwen2.5 only) | Change |
+|---|---|---|---|
+| Booking turn | 28.2, 29.0, 32.7, 31.5, 27.7 → median **29.0** | 20.6, 19.8, 22.1, 19.9, 21.2 → median **20.6** | **−29%** |
+| Follow-up turn | 22.6, 29.1, 25.1, 28.5, 24.2 → median **25.1** | 51.5, 40.3, 42.1, 42.3, 43.8 → median **42.3** | **+69%** |
+| Whole conversation | median **57.8** | median **64.2** | **+11%** |
+
+Free memory at the end: 2.7 GB (off) and 1.4 GB (on). One 7B model fits; two did not (§8).
+
+**Where the time goes (from the trace).**
+- *Booking turn:* the model picks `book_appointment` in 12–13s, the tool runs in 0.1s, and the spoken reply takes 7.5s. No extraction pass is needed. That is why agent mode wins this turn.
+- *Follow-up turn:* two model calls. The agent's reply takes 23–25s, then the enrichment pass (`maybeCommitBooking` → `enrichBooking`, extraction on `LLM_MODEL`) takes 17–27s. The booking already exists, so the enrichment re-reads the transcript for new details, and in this mode it runs on the slower qwen2.5. Agent off pays for enrichment too, but on gemma3.
+
+**Reading.** Agent mode moves the cost from the booking turn to every later turn. The whole conversation comes out at +11%, just outside C2's 10%, and a longer call (more follow-up turns) would do worse. **The flag stays off by default.** The cheapest fix follows from the trace: in agent mode, collect late details through the agent (a tool argument or an `update_booking` tool) and skip the separate enrichment pass. That removes the second model call from every follow-up turn. It is not built yet.
+
+The first attempt at this run overlapped with CPU-heavy test runs and was discarded. Its agent-on follow-up turns were 40–60s, in line with the clean run.
+
