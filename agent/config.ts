@@ -1,5 +1,9 @@
 import path from "path"
 
+/** create-agent: LangChain's createAgent (ADR-001). graph: the same agent hand-built on a StateGraph (ADR-010). */
+export type Engine = "create-agent" | "graph"
+const ENGINES: Engine[] = ["create-agent", "graph"]
+
 export interface Config {
   /** Must be a tool-capable Ollama model (checked at startup). */
   model: string
@@ -11,6 +15,7 @@ export interface Config {
   maxToolCalls: number
   /** DEBUG=true: print each model and tool step (StepTracer) and error stacks. */
   debug: boolean
+  engine: Engine
 }
 
 function positiveInt(env: NodeJS.ProcessEnv, name: string, fallback: number): number {
@@ -31,6 +36,12 @@ function temperature(env: NodeJS.ProcessEnv): number {
   return value
 }
 
+function engine(env: NodeJS.ProcessEnv): Engine {
+  const raw = env.AGENT_ENGINE || "create-agent"
+  if (!ENGINES.includes(raw as Engine)) throw new Error(`AGENT_ENGINE must be one of ${ENGINES.join(", ")}, got "${raw}"`)
+  return raw as Engine
+}
+
 /**
  * Read agent configuration from the environment. Pure, so it can be tested
  * without touching process.env. OLLAMA_MODEL is deliberately not read: it holds
@@ -45,5 +56,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, cwd: string = p
     maxModelCalls: positiveInt(env, "AGENT_MAX_MODEL_CALLS", 12),
     maxToolCalls: positiveInt(env, "AGENT_MAX_TOOL_CALLS", 20),
     debug: env.DEBUG === "true",
+    engine: engine(env),
   }
 }

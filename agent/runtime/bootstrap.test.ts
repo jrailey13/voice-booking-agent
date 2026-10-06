@@ -23,6 +23,12 @@ describe("startAgent", () => {
       .rejects.toBeInstanceOf(ModelCapabilityError)
   })
 
+  it("builds the hand-built LangGraph agent for AGENT_ENGINE=graph", async () => {
+    const graphConfig = loadConfig({ AGENT_ENGINE: "graph" }, process.cwd())
+    const agent = await startAgent(graphConfig, io, { env: {}, fetchImpl: showResponds(["tools"]) })
+    expect(Object.keys((agent as unknown as { nodes: object }).nodes)).toEqual(expect.arrayContaining(["begin", "model", "tools"]))
+  })
+
   it("returns a ready agent when checks pass", async () => {
     const agent = await startAgent(config, io, { env: {}, fetchImpl: showResponds(["completion", "tools"]) })
     expect(typeof agent.invoke).toBe("function")

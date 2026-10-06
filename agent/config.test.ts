@@ -12,7 +12,13 @@ describe("loadConfig", () => {
       maxModelCalls: 12,
       maxToolCalls: 20,
       debug: false,
+      engine: "create-agent",
     })
+  })
+
+  it("selects the hand-built LangGraph engine with AGENT_ENGINE=graph", () => {
+    expect(loadConfig({ AGENT_ENGINE: "graph" }, "/r").engine).toBe("graph")
+    expect(loadConfig({ AGENT_ENGINE: "create-agent" }, "/r").engine).toBe("create-agent")
   })
 
   it("turns on step tracing only for DEBUG=true", () => {
@@ -48,6 +54,7 @@ describe("loadConfig", () => {
     ["AGENT_MAX_MODEL_CALLS", "zero", "0"],
     ["AGENT_MAX_TOOL_CALLS", "not a number", "lots"],
     ["OLLAMA_TEMPERATURE", "out of range", "3"],
+    ["AGENT_ENGINE", "unknown", "langgraph"],
   ])("rejects %s that is %s", (name, _label, value) => {
     expect(() => loadConfig({ [name]: value }, "/r")).toThrow(name)
   })

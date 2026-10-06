@@ -57,9 +57,14 @@ Every path is resolved inside the root. `../`, absolute paths elsewhere, and lin
 | `AGENT_ROOT` | current directory | The sandbox for every tool |
 | `AGENT_MAX_MODEL_CALLS` | `12` | Per request. The run ends with a notice when it is reached. |
 | `AGENT_MAX_TOOL_CALLS` | `20` | Per request |
+| `AGENT_ENGINE` | `create-agent` | `graph` runs the same agent hand-built on a LangGraph `StateGraph` (see below) |
 | `DEBUG` | `false` | `true` prints each model call and tool call as it happens, plus stack traces on errors |
 
 The agent **refuses to start** if `LANGSMITH_TRACING`, `LANGCHAIN_TRACING_V2`, `LANGCHAIN_TRACING`, `LANGSMITH_API_KEY` or `LANGCHAIN_API_KEY` is set. Any of them would send your code to LangSmith.
+
+## Engines
+
+The default engine is LangChain's `createAgent` with middleware. `AGENT_ENGINE=graph` runs the same agent built by hand on a LangGraph `StateGraph` (`executor/graphAgent.ts`), so you can read the loop that `createAgent` hides. Both engines pass the same tests. They differ in one case: if one reply asks for several writes and you decline one of them, `createAgent` cancels all of them, while the graph runs the ones you approved. The comparison is in `docs/langchain-architecture.md` §15.
 
 ## Speed
 
@@ -77,6 +82,7 @@ agent/
 ├── index.ts                 CLI: modes, banner, interactive loop
 ├── config.ts                env → Config (pure)
 ├── executor/agent.ts        buildAgent (createAgent + middleware) and converse (one turn + approvals)
+├── executor/graphAgent.ts   buildGraphAgent: the same agent hand-built on a StateGraph (AGENT_ENGINE=graph)
 ├── runtime/
 │   ├── bootstrap.ts         startup checks, then wires model + tools + checkpointer
 │   ├── guards.ts            refuses remote tracing

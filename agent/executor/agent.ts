@@ -1,5 +1,6 @@
 import {
   createAgent,
+  createMiddleware,
   humanInTheLoopMiddleware,
   modelCallLimitMiddleware,
   toolCallLimitMiddleware,
@@ -10,8 +11,10 @@ import {
 import { Command, type BaseCheckpointSaver } from "@langchain/langgraph"
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models"
 import type { BaseMessage } from "@langchain/core/messages"
+import type { RunnableConfig } from "@langchain/core/runnables"
 import type { Callbacks } from "@langchain/core/callbacks/manager"
 import type { StructuredToolInterface } from "@langchain/core/tools"
+import { z } from "zod"
 import type { AgentIO } from "../runtime/io"
 
 export const AGENT_SYSTEM_PROMPT = `You are a software engineering assistant working inside one project directory.
@@ -33,12 +36,29 @@ export interface AgentDeps {
  * thread's conversation; the middleware bounds runaway loops and pauses for a
  * human before any write. See ADR-001 and ADR-003.
  */
-export function buildAgent(deps: AgentDeps) {
+/**
+ * The call-limit middleware resets its per-run counts in an afterAgent hook,
+ * which `exitBehavior: "end"` jumps past (langchain 1.5.15). Without this, a
+ * request that hit a limit left the count at the limit, and every later request
+ * on the thread stopped before doing anything. Zero the counts as each request
+ * begins; a resume after approval continues mid-request, so it does not reset.
+ */
+const resetRunLimits = createMiddleware({
+  name: "ResetRunLimits",
+  stateSchema: z.object({
+    runModelCallCount: z.number().default(0),
+    runToolCallCount: z.record(z.string(), z.number()).default({}),
+  }),
+  beforeAgent: () => ({ runModelCallCount: 0, runToolCallCount: {} }),
+})
+
+export function buildAgent(deps: AgentDeps): Agent {
   return createAgent({
     model: deps.model,
     tools: deps.tools,
     systemPrompt: deps.systemPrompt ?? AGENT_SYSTEM_PROMPT,
     middleware: [
+      resetRunLimits,
       modelCallLimitMiddleware({ runLimit: deps.limits.modelCalls, exitBehavior: "end" }),
       toolCallLimitMiddleware({ runLimit: deps.limits.toolCalls, exitBehavior: "end" }),
       humanInTheLoopMiddleware({ interruptOn: { write_file: { allowedDecisions: ["approve", "reject"] } } }),
@@ -47,7 +67,14 @@ export function buildAgent(deps: AgentDeps) {
   })
 }
 
-export type Agent = ReturnType<typeof buildAgent>
+/**
+ * What `converse` needs from an agent: invoke a turn (or a resume Command) on a
+ * thread and get the state back. Both buildAgent and buildGraphAgent fit.
+ */
+export interface Agent {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- each engine types its own input
+  invoke(input: any, config: RunnableConfig): Promise<{ messages: BaseMessage[] }>
+}
 
 const PREVIEW_CHARS = 800
 
