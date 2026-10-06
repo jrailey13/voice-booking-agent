@@ -351,7 +351,7 @@ Each phase ships as its own reversible commit series (S2). Phase 2 does not depe
 
 | Next step | Trigger | Notes |
 |---|---|---|
-| Hand-built `StateGraph` agent (Q3 deep dive) | After Phase 1, for learning | Rebuild §4 as explicit `model` → `tools` → `approval` nodes, and compare it with `createAgent` |
+| **Hand-built `StateGraph` agent (Q3 deep dive)** | **Done** (2026-10-06), `AGENT_ENGINE=graph` | The same agent as explicit `begin` → `model` → `tools` nodes, run by the same tests as `createAgent`. Writing it found two `createAgent` behaviours, one of them a bug in the shipped CLI (fixed). ADR-010, §15. |
 | `SqliteSaver` checkpointer | When agent threads should survive restarts | Swaps in through `AgentDeps.checkpointer` with no other change |
 | pgvector + `PGVectorStore` | When the corpus gets large enough that brute-force search is slow | Add a migration for a `vector(768)` column. `PrismaVectorStore` is behind the `VectorStore` interface, so the chain does not change. |
 | **Area 3: structured-output extraction** | **Done** (2026-10-06) | `extractBooking` uses `ChatOllama.withStructuredOutput(RawBookingSchema, { method: "jsonSchema" })`. Ollama constrains decoding to the schema, and LangChain validates the reply, replacing `format: 'json'` + `JSON.parse` + `safeParse`. JSON Schema, not tool calling, because gemma3 has no tools. Live on gemma3, 3 paired runs: same extraction, 8.9/8.7/6.9s vs 12.4/8.7/6.7s before. Tests drive the real `ChatOllama` against a fake Ollama server and pin the `format` it sends. The default reply (`lib/llm.ts`) moved to `ChatOllama` in the same step: history is sent as chat messages, and the timeout cancels the request. `lib/ollama.ts` and the `ollama` package are gone, so every model call in the API now goes through LangChain. |
@@ -400,6 +400,12 @@ Each phase ships as its own reversible commit series (S2). Phase 2 does not depe
 - **Decision:** Both packages refuse to start if any tracing or LangSmith key variable is set. Local observability goes through callbacks.
 - **Alternatives:** Document it only (relies on memory). Uninstall `langsmith` (not possible: it is a hard dependency).
 - **Consequences:** If remote tracing is ever wanted, it needs a deliberate code change, which is the intent.
+
+### ADR-010: Keep a hand-built `StateGraph` engine beside `createAgent`
+- **Context:** `createAgent` hides the loop (§10). The Q3 deep dive asked for the same agent built by hand on LangGraph, to see what the abstraction does.
+- **Decision:** `executor/graphAgent.ts` builds the agent as a `StateGraph`: a `begin` node that zeroes the per-request counters, a `model` node, a `tools` node that pauses with `interrupt()` before writes, and two conditional edges. It uses the same interrupt payload as `humanInTheLoopMiddleware`, so `converse` and the approval prompt drive both engines unchanged. `AGENT_ENGINE=graph` selects it. `createAgent` stays the default.
+- **Alternatives:** Replace `createAgent` (loses the reference implementation and the library's maintenance). Keep the graph in a spike folder (it would rot; as a selectable engine it stays under test).
+- **Consequences:** About 130 lines that we own. The shared behaviour suite runs against both engines, so any difference between them is either pinned in a test or a failing test. The one deliberate difference is described in §15.
 
 ---
 
@@ -495,3 +501,28 @@ These checks used `curl` against the same endpoints the web client calls (`apps/
 4. **Prompt line endings.** The original system prompt was a template literal in a CRLF-checked-out file, so on Windows it was actually sent with `\r\n`. The moved prompt is built with explicit `\n` joins, keeping its original trailing spaces. The contract test normalises line endings.
 5. **`lib/ollama.ts`** lost `generateEmbedding`, `generateAnswer` and `cosineSimilarity`. The voice and booking path's `ollama` client and `checkOllamaHealth` are untouched (non-goal).
 6. **Not done:** the optional `scripts/reindex-rag.ts`. The live check showed old chunks work as they are.
+
+## 15. Hand-built StateGraph agent (2026-10-06)
+
+`agent/executor/graphAgent.ts`, selected with `AGENT_ENGINE=graph` (ADR-010).
+
+```
+START → begin → model ─(tool calls?)─ yes → tools ─(ended on a limit?)─ no → model …
+                      └─ no ──→ END                └─ yes ──→ END
+```
+
+| Concern | `createAgent` | Hand-built graph |
+|---|---|---|
+| State | `messages` plus middleware state (`runModelCallCount`, `threadToolCallCount`, …) | `messages`, `modelCalls`, `toolCalls` (`Annotation.Root`) |
+| System prompt | `systemPrompt` option | Prepended in the `model` node, never stored in the thread |
+| Call limits | `modelCallLimitMiddleware` / `toolCallLimitMiddleware` | Checked in the `model` and `tools` nodes; `begin` resets them per request |
+| Approval | `humanInTheLoopMiddleware` (`afterModel` hook) | `interrupt()` at the top of the `tools` node, before anything runs. LangGraph re-runs the node on resume, so nothing before the interrupt may have side effects. |
+| Tool errors | The tool node reports them | Caught in `execute`, returned to the model as an error `ToolMessage` |
+| Size | 3 middleware + config | ~130 lines |
+
+**Tests.** The behaviour suite in `executor/agent.test.ts` runs against both engines: 13 behaviours × 2. `executor/graphAgent.test.ts` adds three graph-only tests (the prompt stays out of stored state, a failing tool, an unknown tool). Each mechanism was mutation-checked: removing the counter reset, the approval gate, the decline handling, the system prompt, or the error catch each fails at least one test.
+
+**What writing it found in `createAgent` (langchain 1.5.15):**
+1. **Bug, fixed: the call limits never reset after they were hit.** The middleware zeroes its per-run counts in an `afterAgent` hook, and `exitBehavior: "end"` jumps past it. In the interactive CLI, one request that reached a limit left the count at the limit, so every later request in the session stopped at once with "Model call limits exceeded". A `ResetRunLimits` middleware in `buildAgent` now zeroes the counts in `beforeAgent`. Regression tests cover both limits, on both engines.
+2. **Difference, kept and pinned: declining one write cancels the whole batch.** When one model reply holds several writes and the user approves one and declines another, `humanInTheLoopMiddleware` drops the approved call too (it is removed from the message, not run) and returns to the model. The user is not told. The graph runs the approved calls and reports the declined ones. The shared test asserts each engine's behaviour.
+

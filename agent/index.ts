@@ -70,6 +70,7 @@ async function interactive(agent: Agent, io: ConsoleIO, options: ConverseOptions
 function printBanner(config: Config): void {
   console.log(`\n${"=".repeat(60)}\n🤖 Agentic AI Assistant\n${"=".repeat(60)}`)
   console.log(`   Model:  ${config.model} (temperature ${config.temperature})`)
+  console.log(`   Engine: ${config.engine === "graph" ? "hand-built LangGraph StateGraph" : "createAgent"}`)
   console.log(`   Ollama: ${config.ollamaBaseUrl}`)
   console.log(`   Root:   ${config.root}  (tools cannot read or write outside it)`)
   console.log(`   Limits: ${config.maxModelCalls} model calls, ${config.maxToolCalls} tool calls per request`)
@@ -99,6 +100,7 @@ Environment variables:
   AGENT_ROOT             Directory the tools are confined to (default: current directory)
   AGENT_MAX_MODEL_CALLS  Model calls allowed per request (default: 12)
   AGENT_MAX_TOOL_CALLS   Tool calls allowed per request (default: 20)
+  AGENT_ENGINE           "create-agent" (default) or "graph": the same agent hand-built on a StateGraph
   DEBUG                  "true" prints each model and tool step, and stack traces
 
 Writing a file always asks for your approval first.
